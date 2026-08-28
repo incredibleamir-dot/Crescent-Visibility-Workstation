@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt
 
 import astronomy
 import analysis
+from moonwatch import globalmap
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -48,6 +49,17 @@ def _run_check(q, kind, date, lat, lon, tz):
     except Exception as exc:
         res, state, err = None, "error", str(exc)
     q.put((state, res, err))
+
+
+def _run_global_map(q, date):
+    """Worker sub-process: compute the 1-degree visibility grid for ``date``."""
+    try:
+        def _progress(frac):
+            q.put(("progress", frac))
+        data = globalmap.compute(date, progress=_progress)
+        q.put(("done", data))
+    except Exception as exc:
+        q.put(("error", str(exc)))
 
 
 # --------------------------------------------------------------------------- formatting
@@ -83,20 +95,25 @@ def app_logo():
 
 
 # --------------------------------------------------------------------------- textures
+GM_CACHE_MAX = 20   # dates in the in-memory grid cache
+
 class TextureBank:
     """Best-effort loader of the bundled display textures as numpy arrays."""
 
     def __init__(self, assets_dir=None):
         base = assets_dir or os.path.join(ROOT, "assets")
         self._loaded = {}
-        for name, fname in (("sun", "sun.jpg"), ("earth", "earth.jpg"),
-                            ("moon", "moon.jpg")):
+        for name, fname, fmt in (
+                ("sun", "sun.jpg", QImage.Format_RGB888),
+                ("earth", "earth_line.png", QImage.Format_RGBA8888),
+                ("earth_sat", "earth.jpg", QImage.Format_RGB888),
+                ("moon", "moon.jpg", QImage.Format_RGB888)):
             try:
                 img = QImage(os.path.join(base, fname))
-                img = img.convertToFormat(QImage.Format_RGB888)
+                img = img.convertToFormat(fmt)
                 w, h = img.width(), img.height()
                 arr = self._as_array(img, w, h)
-                if name == "earth":
+                if name in ("earth", "earth_sat"):
                     arr = self._scale(img, arr, 512)
                 elif name == "moon":
                     arr = self._scale(img, arr, 192)
@@ -108,11 +125,12 @@ class TextureBank:
 
     @staticmethod
     def _as_array(img, w, h):
+        ch = img.depth() // 8
         buf = img.bits()
         if hasattr(buf, "setsize"):
             buf.setsize(img.sizeInBytes())
-            return np.frombuffer(buf, np.uint8).reshape(h, w, 3).copy()
-        return np.frombuffer(buf.tobytes(), np.uint8).reshape(h, w, 3).copy()
+            return np.frombuffer(buf, np.uint8).reshape(h, w, ch).copy()
+        return np.frombuffer(buf.tobytes(), np.uint8).reshape(h, w, ch).copy()
 
     @staticmethod
     def _scale(img, arr, max_side):
@@ -135,6 +153,7 @@ class AppController(QObject):
     dataChanged = Signal()
     verifyChanged = Signal()
     analysisChanged = Signal()
+    globalMapChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -152,6 +171,14 @@ class AppController(QObject):
         self.live_ts = 0.0
         self.live_sim = None
         self.analysis_results = {}
+        self.global_map = None
+        self.global_map_state = "idle"
+        self.global_map_prog = 0.0
+        self.global_map_error = None
+        self._gm_q = None
+        self._gm_proc = None
+        self._gm_date = None
+        self._gm_cache = {}         # date-ordinal -> grid dict (in-memory)
 
         self.verify = {
             "hz_state": "idle", "hz": None, "hz_error": None,
@@ -191,6 +218,19 @@ class AppController(QObject):
         if self.verify["hz_state"] == "done":
             self.verify["hz_state"] = "stale"
         self.invalidate_analysis()
+        if self._gm_date != self.date.toordinal():
+            cached = self._gm_cache.get(self.date.toordinal())
+            if cached is not None:
+                self.global_map = cached
+                self.global_map_state = "done"
+                self.global_map_prog = 1.0
+                self.global_map_error = None
+                self._gm_date = self.date.toordinal()
+            else:
+                self.global_map = None
+                self.global_map_state = "idle"
+                self.global_map_prog = 0.0
+                self.global_map_error = None
         self.dataChanged.emit()
 
     def set_location(self, city, lat, lon, tz):
@@ -377,6 +417,7 @@ class AppController(QObject):
                 changed = True
         if changed:
             self.verifyChanged.emit()
+        self._drain_global_map()
 
     @staticmethod
     def _take(q):
@@ -387,10 +428,67 @@ class AppController(QObject):
         except (OSError, ValueError, EOFError):
             return ("error", None, "verification process unavailable")
 
+    # ------------------------------------------------------------ global map
+    def ensure_global_map(self, force=False):
+        """Return the cached 1-degree visibility grid for ``self.date``, or
+        (re)start the background worker that computes it."""
+        if (not force and self.global_map is not None
+                and self._gm_date == self.date.toordinal()):
+            return self.global_map
+        if (self.global_map_state == "running"
+                and self._gm_date == self.date.toordinal()):
+            return None
+        if self._gm_proc is not None and self._gm_proc.is_alive():
+            self._gm_proc.terminate()
+        self.global_map = None
+        self.global_map_error = None
+        self.global_map_prog = 0.0
+        self.global_map_state = "running"
+        self._gm_q = q = multiprocessing.Queue()
+        self._gm_date = self.date.toordinal()
+        self._gm_proc = multiprocessing.Process(
+            target=_run_global_map, args=(q, self.date), daemon=True)
+        self._gm_proc.start()
+        self.globalMapChanged.emit()
+        return None
+
+    def _drain_global_map(self):
+        if self._gm_q is None:
+            return
+        try:
+            item = self._gm_q.get_nowait()
+        except queue.Empty:
+            return
+        except (OSError, ValueError, EOFError):
+            self.global_map_state = "idle"
+            self.globalMapChanged.emit()
+            return
+        kind, payload = item
+        if kind == "progress":
+            if self._gm_date == self.date.toordinal():
+                self.global_map_prog = float(payload)
+                self.globalMapChanged.emit()
+        elif kind == "done":
+            self._gm_q = None
+            if self._gm_date == self.date.toordinal():
+                self.global_map = payload
+                self.global_map_state = "done"
+            else:
+                self.global_map_state = "idle"
+            self._gm_cache[payload.get("date").toordinal()] = payload
+            while len(self._gm_cache) > GM_CACHE_MAX:
+                self._gm_cache.pop(next(iter(self._gm_cache)))
+            self.globalMapChanged.emit()
+        elif kind == "error":
+            self._gm_q = None
+            self.global_map_error = str(payload)
+            self.global_map_state = "error"
+            self.globalMapChanged.emit()
+
     def shutdown(self):
         """Stop background work (call on application close)."""
         self._poll.stop()
-        for proc in (self._hz_proc, self._obs_proc):
+        for proc in (self._hz_proc, self._obs_proc, self._gm_proc):
             if proc is not None and proc.is_alive():
                 proc.terminate()
                 proc.join(timeout=2)

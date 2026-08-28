@@ -25,7 +25,7 @@ vendored in `vendor/`, so no astronomy dependency is needed.
 
 | # | View | What it does |
 |---|------|--------------|
-| 1 / S | Sighting | the prediction for the chosen evening: sky diagram + altitude chart + verdict panel |
+| 1 / S | Sighting | the prediction for the chosen evening: sky diagram + altitude chart + verdict panel; press **G** for a world crescent-visibility map |
 | 2 / C | Condition | crescent altitude vs arc of light over the recorded sighting database |
 | 3 / E | Equation | lag time vs arc of light against the visibility boundary curve |
 | 4 / H | Threshold | box-and-whisker of minimum observed values for one parameter (cycle with X) |
@@ -53,6 +53,10 @@ have selected, and the ring follows you as you step through dates.
 |---|---|
 | ![Ramadan & Eid dates](assets/screenshots/shot-dates.png) | ![User Guide](assets/screenshots/shot-guide.png) |
 
+| Global visibility map |
+|---|
+| ![Global visibility map](assets/screenshots/shot-global.png) |
+
 A detailed, in-app **User Guide** (Help ▸ Moon Watch User Guide, Ctrl+F1)
 explains how to read every chart, how sunset / moonset, moon age,
 illumination and crescent width are computed, and the maths behind the
@@ -67,6 +71,7 @@ MABIMS 2023 / Danjon / Odeh (2006) criteria.
 | 1–6 or S / C / E / H / V / L | switch workspace |
 | R | (re)run the NASA HORIZONS comparison |
 | X | cycle the Threshold-analysis parameter |
+| G | toggle the Sighting map (local sky / global visibility map) |
 | D | Ramadan & Eid dates dialog |
 | Ctrl+L | date & location dialog |
 | Ctrl+F1 | User Guide |
@@ -116,10 +121,25 @@ responsive while they work.
 ## Live view
 
 A top-down diagram of the Sun-Earth-Moon system recomputed from your clock
-every 5 seconds: the Moon's orbit, the arc of the orbit where the Moon is
-above the horizon at your location, the Moon at its true phase, and the
-Earth shaded day/night with your location marked. Textured from the bundled
-`assets/` maps when available, with vector fallback.
+every 5 seconds (or the 24 h scrubber): the Moon's orbit, the arc of the orbit
+where the Moon is above the horizon at your location, the Moon at its true
+phase, and the Earth shaded day/night with your location marked. A 24 h slider
+gives the whole night, with **NOW** to snap back to the live instant. Textured
+from the bundled `assets/` maps (a satellite photo for the LIVE Earth globe, a
+Natural Earth black-and-white line map behind the visibility grid) when
+available, with vector fallback.
+
+## Global visibility map (Sighting view, key G)
+
+Switch the Sighting map to **Global** to see, for the same evening, which
+places on Earth could sight the crescent: every 1° cell is evaluated at that
+place's *best time* — the same rules that drive the verdict pill below (Odeh
+2006 zones at sunset + 4/9 of the moonset lag, MABIMS 2023 and Danjon at
+their sunset/best instants) — then classified green (visible) / amber
+(borderline) / red (not visible), with the no-sunset polar band left clear.
+The two views therefore never disagree. The 1° grid (≈64k points) is computed
+in a background sub-process once per date and cached in memory, so stepping
+back and forth between dates is instant; your city is pinned on the map.
 
 ## Project layout
 

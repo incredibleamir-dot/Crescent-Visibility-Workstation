@@ -64,6 +64,49 @@ def main():
     app.processEvents()
     img_stats(win.pages["live"], "live2", outdir)
 
+    # global visibility map: switch the Sighting page to Global mode and wait
+    # for the background worker (spawned sub-process) to deliver the grid
+    sight = win.pages["sight"]
+    sight.mode_combo.setCurrentIndex(1)
+    app.processEvents()
+    deadline = time.time() + 60
+    while time.time() < deadline and win.ctrl.global_map_state == "running":
+        app.processEvents()
+        time.sleep(0.05)
+    app.processEvents()
+    sight._sync_global()
+    app.processEvents()
+    img_stats(sight, "sight_global", outdir)
+    assert win.ctrl.global_map_state in ("done", "error"), win.ctrl.global_map_state
+    if win.ctrl.global_map_state == "done" and win.ctrl.report is not None:
+        from moonwatch import globalmap as gm
+        d = sight.global_widget.data
+        codes = gm.classify("odeh", d["mh"], d["ark"], d["av"], d["w"],
+                            d["ark_b"], d["nolight"])
+        li = int(round(89.0 - win.ctrl.lat))
+        lj = int(round(win.ctrl.lon + 179.0))
+        r = win.ctrl.report
+        if r["zone"] in ("A", "B"):
+            want = gm.VISIBLE
+        elif r["zone"] == "C" or r["mabims"] or r["danjon"]:
+            want = gm.BORDERLINE
+        else:
+            want = gm.NOT_VISIBLE
+        got = int(codes[li, lj])
+        names = {gm.VISIBLE: "VISIBLE", gm.BORDERLINE: "BORDERLINE",
+                 gm.NOT_VISIBLE: "NOT_VISIBLE", gm.NO_SUNSET: "NO_SUNSET"}
+        print("sight_global  verdict@%s: map=%s app=%s"
+              % (win.ctrl.city, names.get(got, "?"), names.get(want, "?")))
+        assert got == want, (got, want, win.ctrl.city)
+    sight._sync_global()          # regression: layer must survive re-sync
+    app.processEvents()
+    sight.global_widget.update()
+    app.processEvents()
+    img_stats(sight, "sight_global2", outdir)
+    sight.mode_combo.setCurrentIndex(0)
+    app.processEvents()
+    img_stats(sight, "sight", outdir)
+
     # let the Verify-page threads finish (HORIZONS + sightings)
     win.tabs.setCurrentIndex(keys.index("verify"))
     app.processEvents()

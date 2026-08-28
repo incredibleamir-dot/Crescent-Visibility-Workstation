@@ -6,16 +6,17 @@ desktop splitter - chart on the left, parameter/result panels on the right.
 """
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                QGroupBox, QLabel, QTableWidget, QSlider,
                                QTableWidgetItem, QHeaderView, QScrollArea,
                                QComboBox, QPushButton, QFrame, QSizePolicy,
-                               QAbstractItemView)
+                               QAbstractItemView, QStackedWidget)
 
 from . import theme
 from .charts import (SkyWidget, AltitudeChartWidget, ScatterWidget,
-                     BoxPlotWidget, LiveWidget, crescent_pixmap, crescent_rot, F)
+                     BoxPlotWidget, LiveWidget, GlobalVisibilityWidget,
+                     crescent_pixmap, crescent_rot, F)
 from .controller import fmt_date, fmt_time, fmt_age_h, coord_str, MABIMS_ARCL, MABIMS_ALT, DANJON_ARCL
 
 
@@ -85,10 +86,49 @@ class SightingPage(QWidget):
 
         self.sky = SkyWidget()
         self.alt_chart = AltitudeChartWidget()
+        self.global_widget = GlobalVisibilityWidget()
+        self.global_widget.set_tex(ctrl.tex)
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Local - this evening",
+                                  "Global visibility map"])
+        self.mode_combo.setToolTip("G - toggle between the local sky diagram "
+                                   "and the world visibility map")
+        self.crit_combo = QComboBox()
+        self.crit_combo.addItems(["Odeh (2006)", "MABIMS 2023", "Danjon limit"])
+        self.crit_combo.setToolTip("Criteria used to colour the map")
+        self._crit_keys = ["odeh", "mabims", "danjon"]
+        self.mode_combo.currentIndexChanged.connect(self._set_mode)
+        self.crit_combo.currentIndexChanged.connect(self._on_crit)
+
+        local_page = QWidget()
+        ll = QVBoxLayout(local_page)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setSpacing(6)
+        ll.addWidget(self.sky, 5)
+        ll.addWidget(self.alt_chart, 3)
+
+        global_page = QWidget()
+        gl = QVBoxLayout(global_page)
+        gl.setContentsMargins(0, 0, 0, 0)
+        gl.addWidget(self.global_widget)
+
+        self.left_stack = QStackedWidget()
+        self.left_stack.addWidget(local_page)
+        self.left_stack.addWidget(global_page)
+
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setSpacing(8)
+        ctrl_row.addWidget(self.mode_combo)
+        ctrl_row.addWidget(self.crit_combo)
+        ctrl_row.addStretch(1)
 
         left = QVBoxLayout()
-        left.addWidget(self.sky, 5)
-        left.addWidget(self.alt_chart, 3)
+        left.setSpacing(6)
+        left.addLayout(ctrl_row)
+        left.addWidget(self.left_stack, 1)
+        left_host = QWidget()
+        left_host.setLayout(left)
 
         self.lbl_date = QLabel()
         self.lbl_date.setObjectName("section")
@@ -155,8 +195,7 @@ class SightingPage(QWidget):
         right.setWidget(right_container)
 
         split = QSplitter(Qt.Horizontal)
-        left_container = left_widget(self.sky, self.alt_chart, stretches=(5, 3))
-        split.addWidget(panel_frame(left_container))
+        split.addWidget(panel_frame(left_host))
         split.addWidget(right)
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 1)
@@ -166,10 +205,35 @@ class SightingPage(QWidget):
         outer.addWidget(split)
 
         ctrl.dataChanged.connect(self.update_view)
+        ctrl.globalMapChanged.connect(self._sync_global)
+        QShortcut(QKeySequence("G"), self).activated.connect(self._toggle_mode)
         self.update_view()
+
+    def _toggle_mode(self):
+        self.mode_combo.setCurrentIndex(1 - self.mode_combo.currentIndex())
+
+    def _set_mode(self, index):
+        self.left_stack.setCurrentIndex(index)
+        self.crit_combo.setEnabled(index == 1)
+        if index == 1:
+            self.ctrl.ensure_global_map()
+            self._sync_global()
+
+    def _on_crit(self, index):
+        self.global_widget.set_crit(self._crit_keys[index])
+
+    def _sync_global(self):
+        c = self.ctrl
+        self.global_widget.set_observer(c.lat, c.lon, c.city)
+        self.global_widget.set_data(c.global_map)
+        self.global_widget.set_status(c.global_map_state, c.global_map_prog,
+                                      c.global_map_error)
+        if self.left_stack.currentIndex() == 1:
+            c.ensure_global_map()
 
     def update_view(self):
         c = self.ctrl
+        self._sync_global()
         self.sky.set_data(c.report, c.altseries)
         self.alt_chart.set_data(c.series14, c.date)
         self.lbl_date.setText(fmt_date(c.date))

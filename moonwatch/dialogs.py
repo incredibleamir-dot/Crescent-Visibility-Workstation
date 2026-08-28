@@ -376,6 +376,19 @@ TODAY.</p>
 zone, a table of the three criteria, the evening parameters table (moon age,
 illumination, altitude, azimuth, elongation, arc of vision, lag time, width,
 distances) and a plain-English reading.</p>
+<p><b>Global visibility map (toggle with <b>G</b>).</b> The top-left selector
+switches from the local sky diagram to a world map of the crescent for the
+same evening: every 1&deg; cell is coloured by the visibility class at that
+location, evaluated at each place's <i>best time</i> (same rules as the
+verdict pill, so the map and the Sighting verdict never disagree) and a
+single glance shows which countries should sight (and which should not). Pick
+the criterion from the second dropdown - the Odeh (2006) default, one of the
+app's MABIMS 2023 and Danjon rules - and the map re-colours instantly. The
+grid is computed by a background worker (10-30 s the first time for a date;
+the title line shows progress); results are kept in memory, so stepping
+backwards and forwards between dates is instant. Your city is marked with a
+pin, and the legend colours are the same classes as the verdict pill. On the
+no-sunset polar band no colours are drawn.</p>
 
 <a name="times"></a><h3>3&nbsp;&nbsp;How the times are calculated</h3>
 <p>Everything is computed from two engines: the vendored
@@ -592,6 +605,7 @@ updates.</p>
 <tr><td>D</td><td>Ramadan &amp; Eid dates...</td></tr>
 <tr><td>R</td><td>run (or re-run) the NASA/JPL HORIZONS comparison</td></tr>
 <tr><td>X</td><td>cycle the Threshold parameter</td></tr>
+<tr><td>G</td><td>toggle the Sighting map: local sky / global visibility map</td></tr>
 <tr><td>Ctrl+F1</td><td>this user guide</td></tr>
 <tr><td>F1</td><td>About Moon Watch</td></tr>
 <tr><td>F11</td><td>fullscreen</td></tr>

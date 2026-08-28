@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QWidget
 import astronomy
 
 from . import theme
+from . import globalmap as gm
 from .controller import fmt_time, fmt_age_h
 
 _FONTS = {}
@@ -121,6 +122,9 @@ def textured_globe_pixmap(tex, R, mode, frac=0.6, rot_deg=0.0):
     bgra = np.zeros((n, n, 4), np.uint8)
     bgra[..., 3] = np.where(inside, 255, 0)
     H, W = tex.shape[0], tex.shape[1]
+    is4 = tex.ndim == 3 and tex.shape[2] == 4
+    rgb = tex[..., :3] if is4 else tex
+    a = tex[..., 3] if is4 else np.full((H, W), 255, np.uint8)
     if mode == "earth":
         lam_sub = frac
         lat = 90.0 - np.degrees(np.arcsin(np.minimum(1.0, r / R)))
@@ -130,10 +134,8 @@ def textured_globe_pixmap(tex, R, mode, frac=0.6, rot_deg=0.0):
         ty = 0.5 - lat / 180.0
         xi = np.clip((tx * (W - 1)).astype(int), 0, W - 1)
         yi = np.clip((ty * (H - 1)).astype(int), 0, H - 1)
-        col = tex[yi, xi]
-        shade = ~((th >= 90.0) & (th <= 270.0))
-        col = col.copy()
-        col[shade] = (col[shade] * 0.45).astype(np.uint8)
+        col = rgb[yi, xi]
+        av = a[yi, xi]
     else:
         w3 = np.sqrt(np.maximum(0.0, R * R - d2))
         lon = np.arctan2(np.where(inside, xx / R, 0.0),
@@ -143,7 +145,8 @@ def textured_globe_pixmap(tex, R, mode, frac=0.6, rot_deg=0.0):
         fy = 0.5 - lat / math.pi
         xi = np.clip((fx * (W - 1)).astype(int), 0, W - 1)
         yi = np.clip((fy * (H - 1)).astype(int), 0, H - 1)
-        col = tex[yi, xi]
+        col = rgb[yi, xi]
+        av = a[yi, xi]
         if mode != "sun":
             i = math.acos(max(-1.0, min(1.0, 2.0 * frac - 1.0)))
             si, ci = math.sin(i), math.cos(i)
@@ -155,6 +158,7 @@ def textured_globe_pixmap(tex, R, mode, frac=0.6, rot_deg=0.0):
     bgra[inside, 0] = col[inside, 2]
     bgra[inside, 1] = col[inside, 1]
     bgra[inside, 2] = col[inside, 0]
+    bgra[inside, 3] = av[inside]
     return pix_from_bgra(bgra)
 
 
@@ -692,6 +696,199 @@ class BoxPlotWidget(QWidget):
                        theme.C_TODAY, F(9))
 
 
+# --------------------------------------------------------------------------- global map
+class GlobalVisibilityWidget(QWidget):
+    """Equirectangular world map of the evening crescent-visibility zones.
+
+    One-degree grid computed in a background sub-process; the widget re-colours
+    instantly when the criterion changes (the zone code is a pure function of
+    the stored moon-altitude / arc-of-light / arc-of-vision / width arrays).
+    """
+
+    CRIT_NAMES = {"odeh": "Odeh (2006)", "mabims": "MABIMS 2023",
+                  "danjon": "Danjon limit"}
+    ZONE_COLORS = {
+        gm.VISIBLE: (43, 158, 95, 175),
+        gm.BORDERLINE: (192, 120, 23, 185),
+        gm.NOT_VISIBLE: (214, 71, 71, 175),
+        gm.NO_SUNSET: (0, 0, 0, 0),
+    }
+    ZONE_KEYS = [(gm.VISIBLE, "Visible"), (gm.BORDERLINE, "Borderline"),
+                 (gm.NOT_VISIBLE, "Not visible"), (gm.NO_SUNSET, "No-sunset cycle")]
+
+    PAD_TOP = 46          # header + legend strip above the map border
+    PAD_SIDE = 8
+    PAD_BOT = 8
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(420, 240)
+        self.data = None
+        self.tex = None
+        self.crit = "odeh"
+        self.lat, self.lon = 30.90, 75.85
+        self.city = ""
+        self.extra = None            # (state, pct, error) from the controller
+        self._img = None
+        self._img_key = None
+
+    def set_data(self, data):
+        self.data = data
+        self._img = None
+        self._img_key = None
+        self.update()
+
+    def set_tex(self, tex):
+        self.tex = tex
+        self.update()
+
+    def set_crit(self, crit):
+        if crit != self.crit:
+            self.crit = crit
+            self._img = None
+            self._img_key = None
+            self.update()
+
+    def set_observer(self, lat, lon, city):
+        self.lat, self.lon, self.city = lat, lon, city
+        self.update()
+
+    def set_status(self, state, pct, error):
+        self.extra = (state, pct, error)
+        self.update()
+
+    # -------------------------------------------------------------- paint
+    def _map_rect(self, w, h):
+        aspect = 2.0
+        avh = h - self.PAD_TOP - self.PAD_BOT
+        if w / avh > aspect:
+            rw = int(avh * aspect)
+            rh = int(avh)
+        else:
+            rw = w - 2 * self.PAD_SIDE
+            rh = int(rw / aspect)
+        return QRect((w - rw) // 2, self.PAD_TOP + (avh - rh) // 2, rw, rh)
+
+    def _build_image(self, rw, rh):
+        d = self.data
+        if d is None:
+            return None
+        mh = d["mh"]; ark = d["ark"]
+        av = d["av"]; w = d["w"]; ark_b = d["ark_b"]
+        nolight = d["nolight"]
+        lat = 90.0 - (np.arange(rh) + 0.5) / rh * 180.0
+        li = np.clip(np.round(89.0 - lat).astype(int), 0, gm.NLAT - 1)
+        lon = -180.0 + (np.arange(rw) + 0.5) / rw * 360.0
+        lci = np.clip(np.round(lon + 179.0).astype(int), 0, gm.NLON - 1)
+        mh2 = mh[li][:, lci]
+        ark2 = ark[li][:, lci]
+        av2 = av[li][:, lci]
+        w2 = w[li][:, lci]
+        arkb2 = ark_b[li][:, lci]
+        nl2 = nolight[li][:, lci]
+        codes = gm.classify(self.crit, mh2, ark2, av2, w2, arkb2, nl2)
+        arr = np.zeros((rh, rw, 4), np.uint8)
+        for code, rgba in self.ZONE_COLORS.items():
+            if rgba[3]:
+                arr[codes == code] = rgba
+        img = QImage(arr.data, rw, rh, rw * 4, QImage.Format_RGBA8888)
+        return img.copy()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = self.width(), self.height()
+        p.fillRect(self.rect(), QColor(theme.CHART_PLOT))
+        rect = self._map_rect(w, h)
+
+        tex = self.tex.get("earth") if self.tex is not None else None
+        if tex is not None:
+            ih, iw = tex.shape[:2]
+            stride = iw * (4 if tex.shape[2] == 4 else 3)
+            fmt = (QImage.Format_RGBA8888 if tex.shape[2] == 4
+                   else QImage.Format_RGB888)
+            p.drawImage(rect, QImage(tex.data, iw, ih, stride, fmt))
+        else:
+            p.fillRect(rect, QColor("#b9cddd"))
+
+        key = (self.crit, rect.width(), rect.height(),
+               None if self.data is None else id(self.data))
+        if self.data is not None and self._img_key != key:
+            self._img = self._build_image(rect.width(), rect.height())
+            self._img_key = key
+        if self._img is not None:
+            p.drawImage(rect, self._img)
+
+        self._draw_graticule(p, rect)
+        self._draw_observer(p, rect)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(theme.BORDER), 1.0))
+        p.drawRect(QRect(rect.x(), rect.y(), rect.width() - 1, rect.height() - 1))
+        self._draw_labels(p, rect)
+        p.end()
+
+    def _draw_graticule(self, p, rect):
+        pen = QPen(QColor(255, 255, 255, 90))
+        pen.setWidthF(0.7)
+        p.setPen(pen)
+        for lon in range(-180, 180, 30):
+            x = rect.x() + (lon + 180.0) / 360.0 * rect.width()
+            p.drawLine(QPointF(x, rect.y()), QPointF(x, rect.bottom()))
+        for lat in range(-60, 61, 30):
+            y = rect.y() + (90.0 - lat) / 180.0 * rect.height()
+            p.drawLine(QPointF(rect.x(), y), QPointF(rect.right(), y))
+        pen = QPen(QColor(255, 255, 255, 150))
+        pen.setWidthF(1.2)
+        p.setPen(pen)
+        ye = rect.y() + 0.5 * rect.height()
+        p.drawLine(QPointF(rect.x(), ye), QPointF(rect.right(), ye))
+
+    def _draw_observer(self, p, rect):
+        px = rect.x() + (self.lon + 180.0) / 360.0 * rect.width()
+        py = rect.y() + (90.0 - self.lat) / 180.0 * rect.height()
+        p.setBrush(QColor(255, 255, 255, 200))
+        p.setPen(QPen(QColor(theme.ACCENT_DARK), 1.4))
+        p.drawEllipse(QPointF(px, py), 4.0, 4.0)
+        if self.city:
+            f = F(8, bold=True)
+            name = self.city.split(",")[0]
+            _draw_text(p, px + 7, py + 3, name, theme.ACCENT_DARK, f)
+
+    def _draw_labels(self, p, rect):
+        f = F(8, bold=True)
+        state, pct, err = self.extra or ("idle", 0.0, None)
+        date_txt = (self.data or {}).get("date")
+        crit = self.CRIT_NAMES.get(self.crit, self.crit)
+        head = ("Evening of %s   -   %s   (best time)" % (date_txt, crit)
+                if date_txt else crit)
+        top = rect.y() - self.PAD_TOP
+        _draw_text(p, rect.x(), top + 8, head, theme.TEXT_DIM, f)
+        st = ""
+        if state == "running":
+            st = "computing 1 degree grid ... %d%%" % int(pct * 100)
+        elif state == "error":
+            st = "error: %s" % (err or "unknown")
+        if st:
+            _draw_text(p, max(rect.x() + tw(f, head) + 24,
+                              rect.right() - tw(f, st) - self.PAD_SIDE),
+                       top + 12, st, theme.ERR if state == "error"
+                       else theme.C_TODAY, f)
+        # legend (above the map border, on white space)
+        lf = F(9)
+        lx = rect.x()
+        ly = top + 23
+        for code, label in self.ZONE_KEYS:
+            rgba = self.ZONE_COLORS[code]
+            p.setBrush(QColor(*rgba[:3]))
+            p.setPen(QPen(QColor(theme.BORDER), 0.6))
+            p.drawRect(QRectF(lx, ly, 11, 11))
+            p.setPen(QColor(theme.TEXT_DIM))
+            p.setFont(lf)
+            p.drawText(QRectF(lx + 15, ly - 1, 200, 14), Qt.AlignLeft, label)
+            lx += 15 + tw(lf, label) + 18
+
+
 # --------------------------------------------------------------------------- live system
 class LiveWidget(QWidget):
     """Live Sun-Earth-Moon graphic for the current instant."""
@@ -778,9 +975,24 @@ class LiveWidget(QWidget):
         ra_s, _ = astronomy.sun_radec(d["jd"])
         lam_sub = (ra_s - gmst) % 360.0
         Rint = int(Re)
-        if self.tex is not None and self.tex.get("earth") is not None:
-            pm = textured_globe_pixmap(self.tex.get("earth"), Rint, "earth", frac=lam_sub)
+        if self.tex is not None and self.tex.get("earth_sat") is not None:
+            pm = textured_globe_pixmap(self.tex.get("earth_sat"), Rint, "earth",
+                                       frac=lam_sub)
             p.drawPixmap(int(cx) - Rint, int(cy) - Rint, pm)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor("#d6dfe8"), 1))
+            p.drawEllipse(QPointF(cx, cy), Re, Re)
+        elif self.tex is not None and self.tex.get("earth") is not None:
+            pm = textured_globe_pixmap(self.tex.get("earth"), Rint, "earth",
+                                       frac=lam_sub)
+            p.setBrush(QColor("#6f8fae"))
+            p.drawEllipse(QPointF(cx, cy), Re, Re)
+            p.setBrush(QColor(26, 51, 74, 128))
+            p.drawPie(QRectF(cx - Re, cy - Re, 2 * Re, 2 * Re), 270 * 16, 180 * 16)
+            p.drawPixmap(int(cx) - Rint, int(cy) - Rint, pm)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor("#d6dfe8"), 1))
+            p.drawEllipse(QPointF(cx, cy), Re, Re)
         else:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor("#6d85a8"))
