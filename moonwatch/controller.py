@@ -62,6 +62,27 @@ def _run_global_map(q, date):
         q.put(("error", str(exc)))
 
 
+def _run_animation_gif(q, date, lat, lon, tz, city, crit, step_min,
+                       grid_step, out_dir, want_sky, want_global, combined):
+    """Worker sub-process: render the GIF animation for one evening.
+
+    ``render_animations`` needs Qt for the painter work, so the worker
+    creates its own offscreen-capable QApplication (``ensure_qapp`` handles
+    that) and ships progress + results back through the queue.
+    """
+    from moonwatch import animation
+    try:
+        def _progress(frac):
+            q.put(("progress", float(frac)))
+        written = animation.render_animations(
+            date, lat, lon, tz, city=city, crit=crit, step_min=step_min,
+            grid_step=grid_step, split=combined, out_dir=out_dir,
+            progress=_progress, want_sky=want_sky, want_global=want_global)
+        q.put(("done", written))
+    except Exception as exc:
+        q.put(("error", str(exc)))
+
+
 # --------------------------------------------------------------------------- formatting
 def fmt_time(dt):
     return dt.strftime("%H:%M") if dt else "--:--"
@@ -154,6 +175,7 @@ class AppController(QObject):
     verifyChanged = Signal()
     analysisChanged = Signal()
     globalMapChanged = Signal()
+    animationChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -179,6 +201,12 @@ class AppController(QObject):
         self._gm_proc = None
         self._gm_date = None
         self._gm_cache = {}         # date-ordinal -> grid dict (in-memory)
+
+        self.animation = {
+            "state": "idle", "prog": 0.0, "paths": [], "error": None,
+        }
+        self._anim_q = None
+        self._anim_proc = None
 
         self.verify = {
             "hz_state": "idle", "hz": None, "hz_error": None,
@@ -418,6 +446,7 @@ class AppController(QObject):
         if changed:
             self.verifyChanged.emit()
         self._drain_global_map()
+        self._drain_animation()
 
     @staticmethod
     def _take(q):
@@ -485,10 +514,61 @@ class AppController(QObject):
             self.global_map_state = "error"
             self.globalMapChanged.emit()
 
+    # -------------------------------------------------------------- animation
+    def run_animation(self, date=None, city=None, crit="odeh",
+                      step_min=5, grid_step=2, out_dir=None,
+                      want_sky=True, want_global=True, combined=False):
+        """Start rendering the GIF animation for one evening in a worker."""
+        if self.animation["state"] == "running":
+            return False
+        if date is None:
+            date = self.date
+        if city is None:
+            city = self.city
+        if self._anim_proc is not None and self._anim_proc.is_alive():
+            self._anim_proc.terminate()
+        if not out_dir:
+            out_dir = os.path.join(ROOT, "animations")
+        self.animation.update(state="running", prog=0.0, paths=[],
+                              error=None)
+        self._anim_q = q = multiprocessing.Queue()
+        self._anim_proc = multiprocessing.Process(
+            target=_run_animation_gif,
+            args=(q, date, self.lat, self.lon, self.tz, city, crit, step_min,
+                  grid_step, out_dir, want_sky, want_global, combined),
+            daemon=True)
+        self._anim_proc.start()
+        self.animationChanged.emit()
+        return True
+
+    def _drain_animation(self):
+        if self._anim_q is None:
+            return
+        try:
+            item = self._anim_q.get_nowait()
+        except queue.Empty:
+            return
+        except (OSError, ValueError, EOFError):
+            self.animation.update(state="error",
+                                  error="animation worker unavailable")
+            self.animationChanged.emit()
+            return
+        kind, payload = item
+        if kind == "progress":
+            self.animation["prog"] = float(payload)
+        elif kind == "done":
+            self._anim_q = None
+            self.animation.update(state="done", prog=1.0, paths=list(payload))
+        elif kind == "error":
+            self._anim_q = None
+            self.animation.update(state="error", error=str(payload))
+        self.animationChanged.emit()
+
     def shutdown(self):
         """Stop background work (call on application close)."""
         self._poll.stop()
-        for proc in (self._hz_proc, self._obs_proc, self._gm_proc):
+        for proc in (self._hz_proc, self._obs_proc, self._gm_proc,
+                     self._anim_proc):
             if proc is not None and proc.is_alive():
                 proc.terminate()
                 proc.join(timeout=2)

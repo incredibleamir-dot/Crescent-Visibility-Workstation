@@ -1,11 +1,24 @@
 # Moon Watch - Crescent Visibility Workstation — Release Notes
 
-**Version 1.0.1** · PySide6 desktop app for predicting and analysing new-crescent
+**Version 1.1.0** · PySide6 desktop app for predicting and analysing new-crescent
 visibility (Ramadan / Eid) from any location.
 
 > Repository: [Crescent-Visibility-Workstation](https://github.com/incredibleamir-dot/Crescent-Visibility-Workstation)
 
 ---
+
+## What's new in v1.1.0
+
+- **GIF animation export** (new): **Tools ▸ Export animation (GIF)...** (Ctrl+E) turns any
+  chosen evening into an animation running from 1 hour before sunset to 1 hour after it.
+  Three outputs: the **west-looking sky** (Sun, Moon and the trail the Moon traces through
+  the whole window), the **global visibility map** recoloured at every instant with the same
+  Odeh / MABIMS / Danjon rules as the app, and an optional **combined** GIF (sky above the
+  map). A date picker, output-folder choice and progress bar are in the dialog; the heavy
+  grid computation runs in a background sub-process so the interface never freezes.
+- **Physically setting sun**: the sun in the sky frames now climbs before sunset, touches
+  the horizon at sunset, and sinks out of view — it is no longer glued to the horizon line.
+- **Dependency**: added Pillow (used for GIF frame assembly).
 
 ## What's new in v1.0.1
 
@@ -41,7 +54,7 @@ visibility (Ramadan / Eid) from any location.
 
 ## Requirements & build
 
-- Python 3.11+, `pip install -r requirements.txt` (PySide6, numpy, pandas).
+- Python 3.11+, `pip install -r requirements.txt` (PySide6, numpy, pandas, Pillow).
 - Run: `python main.py`
 - Build: `python -m PyInstaller --clean --noconfirm MoonWatch.spec`
   → `dist/MoonWatch.exe`

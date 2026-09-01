@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                                QDoubleSpinBox, QGroupBox, QFormLayout,
                                QTextBrowser, QScrollArea, QWidget, QFrame,
                                QLineEdit, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QAbstractItemView)
+                               QHeaderView, QAbstractItemView, QCheckBox,
+                               QProgressBar, QFileDialog)
 
 try:
     from PySide6.QtPrintSupport import QPrinter, QPrintDialog
@@ -21,7 +22,7 @@ except Exception:
 import islamic
 
 from . import theme
-from .controller import fmt_date, app_logo
+from .controller import fmt_date, coord_str, app_logo
 from .charts import F
 
 CITIES = [
@@ -126,6 +127,154 @@ class LocationDateDialog(QDialog):
         qd = self.date_edit.date()
         when = datetime.datetime(qd.year(), qd.month(), qd.day())
         return name, la, lo, tz, when
+
+
+def _default_anim_dir():
+    return os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "animations")
+
+
+class GenerateAnimationDialog(QDialog):
+    """Export the selected evening as an animated GIF (west sky / global map).
+
+    Frames run from 1 hour before the place's sunset to 1 hour after it.
+    The heavy grid computation and rendering happen in a background worker
+    (see ``AppController.run_animation``) so the interface stays responsive;
+    progress and the finished files stream back over the controller signal.
+    """
+
+    STEP_MIN = 5                 # seconds of on-screen motion -> 25 frames
+    GRID_STEP = 2                # degrees per grid cell of the global frames
+
+    def __init__(self, ctrl, parent=None):
+        super().__init__(parent)
+        self.ctrl = ctrl
+        self.setWindowTitle("Export animation (GIF)")
+        self.setModal(True)
+        self.setMinimumWidth(470)
+
+        eve = QGroupBox("Evening to animate")
+        ev = QFormLayout(eve)
+        qd = QDate(ctrl.date.year, ctrl.date.month, ctrl.date.day)
+        self.date_edit = QDateEdit(qd)
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("dd MMM yyyy")
+        ev.addRow("Date", self.date_edit)
+
+        self.place_lbl = QLabel(
+            "%s\n(%s)" % (ctrl.city,
+                          coord_str(ctrl.lat, ctrl.lon, ctrl.tz)))
+        self.place_lbl.setWordWrap(True)
+        self.place_lbl.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+        ev.addRow("Place", self.place_lbl)
+
+        self.crit_combo = QComboBox()
+        self.crit_combo.addItem("Odeh (2006)", "odeh")
+        self.crit_combo.addItem("MABIMS 2023", "mabims")
+        self.crit_combo.addItem("Danjon limit", "danjon")
+        ev.addRow("Visibility rule", self.crit_combo)
+
+        scope = QGroupBox("What to export")
+        sl = QVBoxLayout(scope)
+        self.chk_sky = QCheckBox("West-looking sky map (moon + sun + trail)")
+        self.chk_sky.setChecked(True)
+        self.chk_map = QCheckBox("Global visibility map (world crescent)")
+        self.chk_map.setChecked(True)
+        self.chk_comb = QCheckBox("Combined GIF (sky above the map)")
+        self.chk_comb.setChecked(False)
+        tip = QLabel("Simulation window: 1 hour before sunset to 1 hour "
+                     "after it.  Each frame is a different instant.")
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color: %s;" % theme.TEXT_MUT)
+        sl.addWidget(self.chk_sky)
+        sl.addWidget(self.chk_map)
+        sl.addWidget(self.chk_comb)
+        sl.addWidget(tip)
+        self.chk_sky.toggled.connect(self._sync_comb)
+        self.chk_map.toggled.connect(self._sync_comb)
+        self._sync_comb()
+        self.chk_comb.toggled.connect(self._sync_comb)
+
+        out = QGroupBox("Output folder")
+        ol = QVBoxLayout(out)
+        row = QHBoxLayout()
+        self.folder_edit = QLineEdit(_default_anim_dir())
+        self.folder_edit.setReadOnly(True)
+        browse = QPushButton("Browse...")
+        browse.clicked.connect(self._pick_folder)
+        row.addWidget(self.folder_edit, 1)
+        row.addWidget(browse)
+        ol.addLayout(row)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.status = QLabel("Ready.")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        self.gen_btn = QPushButton("Generate")
+        self.gen_btn.setProperty("primary", True)
+        self.gen_btn.setDefault(True)
+        self.gen_btn.clicked.connect(self._generate)
+        btns.addWidget(close)
+        btns.addWidget(self.gen_btn)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(eve)
+        lay.addWidget(scope)
+        lay.addWidget(out)
+        lay.addWidget(self.progress)
+        lay.addWidget(self.status)
+        lay.addSpacing(4)
+        lay.addLayout(btns)
+
+        self.ctrl.animationChanged.connect(self._on_anim)
+
+    def _sync_comb(self):
+        both = self.chk_sky.isChecked() and self.chk_map.isChecked()
+        self.chk_comb.setEnabled(both)
+
+    def _pick_folder(self):
+        start = self.folder_edit.text() or _default_anim_dir()
+        folder = QFileDialog.getExistingDirectory(self, "Output folder", start)
+        if folder:
+            self.folder_edit.setText(folder)
+
+    def _generate(self):
+        qd = self.date_edit.date()
+        when = datetime.datetime(qd.year(), qd.month(), qd.day())
+        started = self.ctrl.run_animation(
+            date=when,
+            crit=self.crit_combo.currentData(),
+            step_min=self.STEP_MIN,
+            grid_step=self.GRID_STEP,
+            out_dir=self.folder_edit.text() or None,
+            want_sky=self.chk_sky.isChecked(),
+            want_global=self.chk_map.isChecked(),
+            combined=self.chk_comb.isChecked())
+        if started:
+            self.gen_btn.setEnabled(False)
+            self.status.setText("Rendering...")
+
+    def _on_anim(self):
+        a = self.ctrl.animation
+        if a["state"] == "running":
+            pct = int(a["prog"] * 100)
+            self.progress.setValue(pct)
+            self.status.setText("Rendering... %d%%" % pct)
+        elif a["state"] == "done":
+            self.progress.setValue(100)
+            names = ", ".join(t for t, _ in a["paths"])
+            self.status.setText("Done: %s" % names)
+            self.gen_btn.setEnabled(True)
+        elif a["state"] == "error":
+            self.status.setText("Error: %s" % (a["error"] or "unknown"))
+            self.gen_btn.setEnabled(True)
 
 
 class DatesDialog(QDialog):

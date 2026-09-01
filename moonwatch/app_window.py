@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QMainWindow, QTabWidget, QLabel, QToolBar
 from . import theme
 from .controller import AppController, fmt_date, coord_str, app_logo
 from .pages import SightingPage, AnalysisPage, VerifyPage, LivePage
-from .dialogs import LocationDateDialog, DatesDialog, AboutDialog, UserGuideDialog
+from .dialogs import (LocationDateDialog, DatesDialog, AboutDialog,
+                      UserGuideDialog, GenerateAnimationDialog)
 
 ICON = "#5a6a7a"
 ICON_ON = "#ffffff"
@@ -211,6 +212,10 @@ class MainWindow(QMainWindow):
         self.act_param.setShortcut(Qt.Key_X)
         self.act_param.triggered.connect(self._cycle_param)
 
+        self.act_anime = QAction("Export animation (GIF)...", self)
+        self.act_anime.setShortcut("Ctrl+E")
+        self.act_anime.triggered.connect(self.show_animation)
+
         self.act_full = QAction("Toggle fullscreen", self)
         self.act_full.setShortcut(Qt.Key_F11)
         self.act_full.triggered.connect(self._toggle_fullscreen)
@@ -271,6 +276,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.act_full)
 
         tools_menu = mb.addMenu("&Tools")
+        tools_menu.addAction(self.act_anime)
         tools_menu.addAction(self.act_check)
         tools_menu.addAction(self.act_param)
 
@@ -360,6 +366,10 @@ class MainWindow(QMainWindow):
 
     def show_dates(self):
         dlg = DatesDialog(self.ctrl, self)
+        dlg.exec()
+
+    def show_animation(self):
+        dlg = GenerateAnimationDialog(self.ctrl, self)
         dlg.exec()
 
     def show_about(self):
