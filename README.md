@@ -15,7 +15,8 @@ python main.py
 Needs Python 3.11+, with `PySide6`, `PyVista` (incl. `pyvistaqt`), `numpy` and
 `pandas` (install once with `pip install -r requirements.txt`). The
 `solarsystem` astronomy library is vendored in `vendor/`, so no astronomy
-dependency is needed. `PyVista`/`vtk` power the interactive 3D Live sky.
+dependency is needed. `PyVista`/`vtk` power the interactive 3D Live sky, and
+`opencv-python` (`cv2`) encodes the 3D sky **MP4** export.
 
 ## Repository
 
@@ -144,6 +145,11 @@ Top, North, South, East, West) plus click-drag rotate / scroll-zoom give full
 control, and the **Grid**, **Moon path**, **Sun path** and **Labels** toggles
 declutter the scene. All values come from the same astronomy engine that drives
 every other view, so the Live sky can never disagree with the Sighting verdict.
+
+From **Tools ▸ Export animation (GIF)...** you can also export the 3D sky as an
+**MP4** (`sky-3d-<date>.mp4`): a small preview window opens, the dome is played
+through a complete 24-hour Sun/Moon cycle while the camera slowly orbits 360°,
+and the window closes itself when the file is written (requires OpenCV).
 
 ## Global visibility map (Sighting view, key G)
 

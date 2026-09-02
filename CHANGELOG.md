@@ -17,6 +17,11 @@
     North, South, East, West camera buttons plus click-drag / scroll-zoom.
   - All values come from the same astronomy engine as every other view.
 - Added `pyvista>=0.44` and `pyvistaqt>=0.11` to `requirements.txt` (power the 3D sky).
+- **3D sky animation export (MP4)** added to the existing *Export animation* dialog: a new
+  *"3D sighting sky (MP4) - full 24 h + orbiting camera"* option renders the whole 3D dome
+  through a complete 24-hour Sun/Moon cycle while the camera slowly orbits 360°, written to
+  `animations/sky-3d-<date>.mp4` (H.264 via OpenCV).  It opens a small preview window that
+  closes itself when the file is written.  Requires OpenCV (`opencv-python`).
 
 
 ## [1.1.0] - 2026-09-01

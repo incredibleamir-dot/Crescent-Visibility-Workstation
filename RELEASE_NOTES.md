@@ -22,6 +22,10 @@ visibility (Ramadan / Eid) from any location.
 - **Controls**: Reset / Top / North / South / East / West camera buttons plus
   click-drag rotate and scroll-zoom; Grid / Moon path / Sun path / Labels toggles.
 - **Dependency**: added PyVista and PyVistaQt (used only by the 3D Live sky).
+- **3D sky animation export (MP4)**: the *Export animation* dialog now also offers the 3D
+  dome as an MP4 (`sky-3d-<date>.mp4`). Selecting it opens a small preview window that plays
+  the whole 24-hour Sun/Moon cycle while the camera slowly orbits 360°, then closes itself
+  when the file is written. Requires OpenCV (`opencv-python`).
 
 ## What's new in v1.1.0
 
@@ -70,7 +74,7 @@ visibility (Ramadan / Eid) from any location.
 
 ## Requirements & build
 
-- Python 3.11+, `pip install -r requirements.txt` (PySide6, PyVista, PyVistaQt, numpy, pandas, Pillow).
+- Python 3.11+, `pip install -r requirements.txt` (PySide6, PyVista, PyVistaQt, numpy, pandas, Pillow, OpenCV).
 - Run: `python main.py`
 - Build: `python -m PyInstaller --clean --noconfirm MoonWatch.spec`
   → `dist/MoonWatch.exe`

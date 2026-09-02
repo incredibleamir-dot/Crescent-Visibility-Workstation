@@ -465,3 +465,19 @@ def ensure_qapp():
     if QApplication.instance() is None:
         QApplication([])
     return QApplication.instance()
+
+
+# ---------------------------------------------------------------------------
+# 3D sighting sky MP4
+# ---------------------------------------------------------------------------
+def _live_at(date, lat, lon, tz, city, seconds):
+    """Minimal live-dict for one instant, matching the Live widget's source
+    fields, so the 3D sky can be driven without a full controller."""
+    target_local = (datetime.datetime.combine(date, datetime.time(0, 0)) +
+                    datetime.timedelta(seconds=seconds))
+    jd = astronomy.jd_utc(target_local - datetime.timedelta(hours=tz))
+    s_alt, s_az = astronomy.sun_alt_az(jd, lat, lon)
+    m_alt, m_az = astronomy.moon_alt_az(jd, lat, lon)
+    return {"jd": jd, "s_alt": s_alt, "s_az": s_az,
+            "m_alt": m_alt, "m_az": m_az,
+            "_lat": lat, "_lon": lon, "_city": city, "local": target_local}

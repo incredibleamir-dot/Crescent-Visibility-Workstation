@@ -1,9 +1,12 @@
 """Modal dialogs: date & location, Ramadan / Eid dates, User guide, About."""
 
 import datetime
+import math
 import os
 
-from PySide6.QtCore import Qt, QDate, QUrl
+import numpy as np
+
+from PySide6.QtCore import Qt, QDate, QUrl, QTimer
 from PySide6.QtGui import QImage, QTextDocument, QColor
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QDateEdit, QComboBox,
@@ -22,7 +25,7 @@ except Exception:
 import islamic
 
 from . import theme
-from .controller import fmt_date, coord_str, app_logo
+from .controller import fmt_date, coord_str, app_logo, TextureBank
 from .charts import F
 
 CITIES = [
@@ -134,13 +137,153 @@ def _default_anim_dir():
         os.path.abspath(__file__))), "animations")
 
 
-class GenerateAnimationDialog(QDialog):
-    """Export the selected evening as an animated GIF (west sky / global map).
+class SkyMP4Dialog(QDialog):
+    """Modal window that renders the 3D sighting sky into an MP4.
 
-    Frames run from 1 hour before the place's sunset to 1 hour after it.
-    The heavy grid computation and rendering happen in a background worker
-    (see ``AppController.run_animation``) so the interface stays responsive;
-    progress and the finished files stream back over the controller signal.
+    PyVista's QtInteractor needs a live display and its own event loop, so the
+    whole 24-hour cycle with a slowly orbiting camera is produced here in a
+    dedicated window (rather than the offscreen GIF sub-process).  Frames are
+    captured from the widget on a QTimer and encoded incrementally with OpenCV;
+    the window closes itself when the last frame is written.
+    """
+
+    FPS = 24
+    DURATION_SEC = 24
+    SIZE = (800, 800)            # square output, capped at 800x800
+    CAM_RADIUS = 4.8             # zoom the dome out -> margin on all sides
+
+    def __init__(self, path, date, lat, lon, tz, city="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Generating 3D sky MP4")
+        self.setModal(True)
+        self._path = path
+        self._date = date
+        self._lat, self._lon, self._tz, self._city = lat, lon, tz, city
+        self._fps = self.FPS
+        self._n = max(2, int(self._fps * self.DURATION_SEC))
+        self._w, self._h = self.SIZE
+        self._i = 0
+        self._writer = None
+        self._error = None
+        self.out_path = path
+
+        from .sighting_sky_3d import SightingSky3D
+        self.sky = SightingSky3D()
+        self.sky.set_tex(TextureBank())
+        for w in (self.sky.findChildren(QCheckBox)
+                  + self.sky.findChildren(QPushButton)):
+            w.hide()
+        self.sky.plotter.setFixedSize(self._w, self._h)
+        self.sky.resize(self._w + 40, self._h)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, self._n)
+        self.progress.setValue(0)
+        self.status = QLabel("Preparing 3D sky window...")
+        self.status.setWordWrap(True)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(self.sky, 1)
+        lay.addWidget(self.progress)
+        lay.addWidget(self.status)
+
+        self.timer = QTimer(self)
+        self.timer.setInterval(0)
+        self.timer.timeout.connect(self._step)
+        self.timer.start()
+
+    # ------------------------------------------------------------ geometry
+    def _orbit_pos(self, az_deg):
+        a = math.radians(22.0)
+        az = math.radians(az_deg)
+        r = self.CAM_RADIUS
+        return (r * math.cos(a) * math.sin(az),
+                r * math.cos(a) * math.cos(az),
+                r * math.sin(a))
+
+    # ----------------------------------------------------------------------
+    def _step(self):
+        if self._error is not None:
+            return
+        if self._writer is None:
+            try:
+                import cv2
+                self._writer = cv2.VideoWriter(
+                    self._path, cv2.VideoWriter_fourcc(*"mp4v"),
+                    self._fps, (self._w, self._h))
+                if not self._writer.isOpened():
+                    raise RuntimeError(
+                        "Could not open MP4 writer: " + self._path)
+                self.sky.plotter.camera_position = [
+                    self._orbit_pos(0.0), (0, 0, 0.3), (0, 0, 1)]
+                self.sky.plotter.render()
+            except Exception as exc:
+                self._finish(error=exc)
+                return
+
+        frac = self._i / max(1, self._n - 1)
+        from .animation import _live_at
+        self.sky.set_data(
+            _live_at(self._date, self._lat, self._lon, self._tz, self._city,
+                     frac * 86400.0),
+            self.sky._tex)
+        az = frac * 360.0
+        self.sky.plotter.camera_position = [self._orbit_pos(az),
+                                            (0, 0, 0.3), (0, 0, 1)]
+        self.sky.plotter.render()
+
+        try:
+            import cv2
+            frame = self.sky.plotter.screenshot(
+                transparent_background=False)
+            bgr = cv2.cvtColor(np.asarray(frame)[:, :, :3],
+                               cv2.COLOR_RGB2BGR)
+            bgr = cv2.resize(bgr, (self._w, self._h))
+            self._writer.write(
+                np.ascontiguousarray(bgr, dtype=np.uint8))
+        except Exception as exc:
+            self._finish(error=exc)
+            return
+
+        self._i += 1
+        self.progress.setValue(self._i)
+        self.status.setText("Rendering 3D sky... %d / %d"
+                            % (self._i, self._n))
+        if self._i >= self._n:
+            self._finish()
+
+    def _finish(self, error=None):
+        self._error = error
+        self.timer.stop()
+        try:
+            if self._writer is not None:
+                self._writer.release()
+        except Exception:
+            pass
+        try:
+            self.sky.teardown()
+        except Exception:
+            pass
+        if error is not None:
+            self.out_path = None
+            self.progress.setValue(0)
+            self.status.setText("Error: %s" % error)
+        else:
+            self.progress.setValue(self._n)
+            self.status.setText("Done: %s" % self._path)
+        self.timer = None
+        self.accept()
+
+
+class GenerateAnimationDialog(QDialog):
+    """Export the selected evening as GIF animation(s) and/or a 3D sky MP4.
+
+    The GIF frames run from 1 hour before the place's sunset to 1 hour after
+    it; the heavy grid computation and rendering happen in a background worker
+    (see ``AppController.run_animation``) so the interface stays responsive and
+    progress / finished files stream back over the controller signal.  The 3D
+    sky MP4 instead plays the whole 24 h in a self-closing preview window
+    (``SkyMP4Dialog``) since PyVista needs a live display.
     """
 
     STEP_MIN = 5                 # seconds of on-screen motion -> 25 frames
@@ -149,7 +292,7 @@ class GenerateAnimationDialog(QDialog):
     def __init__(self, ctrl, parent=None):
         super().__init__(parent)
         self.ctrl = ctrl
-        self.setWindowTitle("Export animation (GIF)")
+        self.setWindowTitle("Export animation")
         self.setModal(True)
         self.setMinimumWidth(470)
 
@@ -182,13 +325,18 @@ class GenerateAnimationDialog(QDialog):
         self.chk_map.setChecked(True)
         self.chk_comb = QCheckBox("Combined GIF (sky above the map)")
         self.chk_comb.setChecked(False)
+        self.chk_3d = QCheckBox("3D sighting sky (MP4) - full 24 h + orbiting camera")
+        self.chk_3d.setChecked(False)
         tip = QLabel("Simulation window: 1 hour before sunset to 1 hour "
-                     "after it.  Each frame is a different instant.")
+                     "after it.  Each frame is a different instant.  The 3D "
+                     "MP4 instead holds the whole 24 h with a slow camera "
+                     "orbit.")
         tip.setWordWrap(True)
         tip.setStyleSheet("color: %s;" % theme.TEXT_MUT)
         sl.addWidget(self.chk_sky)
         sl.addWidget(self.chk_map)
         sl.addWidget(self.chk_comb)
+        sl.addWidget(self.chk_3d)
         sl.addWidget(tip)
         self.chk_sky.toggled.connect(self._sync_comb)
         self.chk_map.toggled.connect(self._sync_comb)
@@ -248,18 +396,47 @@ class GenerateAnimationDialog(QDialog):
     def _generate(self):
         qd = self.date_edit.date()
         when = datetime.datetime(qd.year(), qd.month(), qd.day())
-        started = self.ctrl.run_animation(
-            date=when,
-            crit=self.crit_combo.currentData(),
-            step_min=self.STEP_MIN,
-            grid_step=self.GRID_STEP,
-            out_dir=self.folder_edit.text() or None,
-            want_sky=self.chk_sky.isChecked(),
-            want_global=self.chk_map.isChecked(),
-            combined=self.chk_comb.isChecked())
-        if started:
+        out_dir = self.folder_edit.text() or None
+
+        want_3d = self.chk_3d.isChecked()
+        want_gif = self.chk_sky.isChecked() or self.chk_map.isChecked()
+
+        if want_3d:
             self.gen_btn.setEnabled(False)
-            self.status.setText("Rendering...")
+            self.status.setText("Generating 3D sky MP4...")
+            try:
+                folder = out_dir or _default_anim_dir()
+                os.makedirs(folder, exist_ok=True)
+                path = os.path.join(folder, "sky-3d-%s.mp4"
+                                    % when.strftime("%Y-%m-%d"))
+                dlg = SkyMP4Dialog(path, when, self.ctrl.lat, self.ctrl.lon,
+                                   self.ctrl.tz, city=self.ctrl.city, parent=self)
+                dlg.exec()
+                if dlg.out_path:
+                    self.status.setText("Done: %s" % dlg.out_path)
+                elif dlg._error:
+                    self.status.setText("Error: %s" % dlg._error)
+                else:
+                    self.status.setText("3D sky export cancelled.")
+            except Exception as exc:
+                self.status.setText("Error: %s" % exc)
+            finally:
+                if not want_gif:
+                    self.gen_btn.setEnabled(True)
+
+        if want_gif:
+            started = self.ctrl.run_animation(
+                date=when,
+                crit=self.crit_combo.currentData(),
+                step_min=self.STEP_MIN,
+                grid_step=self.GRID_STEP,
+                out_dir=out_dir,
+                want_sky=self.chk_sky.isChecked(),
+                want_global=self.chk_map.isChecked(),
+                combined=self.chk_comb.isChecked())
+            if started:
+                self.gen_btn.setEnabled(False)
+                self.status.setText("Rendering...")
 
     def _on_anim(self):
         a = self.ctrl.animation

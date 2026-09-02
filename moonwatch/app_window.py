@@ -212,7 +212,7 @@ class MainWindow(QMainWindow):
         self.act_param.setShortcut(Qt.Key_X)
         self.act_param.triggered.connect(self._cycle_param)
 
-        self.act_anime = QAction("Export animation (GIF)...", self)
+        self.act_anime = QAction("Export animation...", self)
         self.act_anime.setShortcut("Ctrl+E")
         self.act_anime.triggered.connect(self.show_animation)
 
