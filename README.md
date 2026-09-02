@@ -55,6 +55,10 @@ have selected, and the ring follows you as you step through dates.
 |---|
 | ![3D Alt-Az sighting sky](assets/screenshots/shot-skyview-3d.png) |
 
+| 3D sky MP4 export (24 h orbit) |
+|---|
+| <video src="assets/screenshots/vid-live-3D.mp4" controls></video> |
+
 | Ramadan & Eid dates | User Guide |
 |---|---|
 | ![Ramadan & Eid dates](assets/screenshots/shot-dates.png) | ![User Guide](assets/screenshots/shot-guide.png) |
