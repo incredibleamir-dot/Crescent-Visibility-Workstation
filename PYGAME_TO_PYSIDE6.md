@@ -36,7 +36,7 @@ that the original UI consumed.
 | the "neon" retro font & glow | Segoe UI + flat light palette (`theme.py`) |
 | modal popups | `QDialog` (setup / dates / about), `dialogs.py` |
 | 14-evening bar chart | bar canvas in the Sighting view |
-| live 5 s timer | `QTimer` driving a `LiveWidget` refresh |
+| live 5 s timer | `QTimer` driving the Live view refresh (`LivePage` → interactive 3D Alt–Az sky, `sighting_sky_3d.py`) |
 | HORIZONS / sightings checks | separate **sub-processes** so the pure-Python astronomy loops never stall the GUI thread; results arrive through queues drained by a `QTimer` (`AppController.start_checks()`) |
 | key handling | `QShortcut` (see table below) |
 

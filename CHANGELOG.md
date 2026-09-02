@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.2.0] - 2026-09-02
+
+### Added
+- **Interactive 3D Altitude–Azimuth Sighting Sky** in the Live view (replaces the old
+  flat 2D Sun–Earth–Moon diagram), rendered with PyVista / PyVistaQt:
+  - Hemispherical celestial dome in the local Alt–Az frame — compass cardinals (N
+    highlighted), altitude rings, azimuth grid, horizon rim and a translucent
+    earth-textured ground.
+  - Sun as a glowing sphere; the **Moon drawn at its true phase** — the lit crescent is
+    shaded from the Sun's direction, so it faces and thins exactly as the real Moon does.
+  - Observer → Sun / Moon lines, a dashed Sun–Moon angular-separation link, and ±3 h
+    trails for both bodies (toggle Moon/Sun path).
+  - Screen-facing Sun / Moon readouts (name, altitude, azimuth) and the observer's
+    location name + Lat/Lon; Grid / Moon path / Sun path / Labels toggles; Reset, Top,
+    North, South, East, West camera buttons plus click-drag / scroll-zoom.
+  - All values come from the same astronomy engine as every other view.
+- Added `pyvista>=0.44` and `pyvistaqt>=0.11` to `requirements.txt` (power the 3D sky).
+
+
 ## [1.1.0] - 2026-09-01
 
 ### Added

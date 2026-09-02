@@ -15,8 +15,9 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
 
 from . import theme
 from .charts import (SkyWidget, AltitudeChartWidget, ScatterWidget,
-                     BoxPlotWidget, LiveWidget, GlobalVisibilityWidget,
+                     BoxPlotWidget, GlobalVisibilityWidget,
                      crescent_pixmap, crescent_rot, F)
+from .sighting_sky_3d import SightingSky3D
 from .controller import fmt_date, fmt_time, fmt_age_h, coord_str, MABIMS_ARCL, MABIMS_ALT, DANJON_ARCL
 
 
@@ -670,7 +671,8 @@ class LivePage(QWidget):
     def __init__(self, ctrl, parent=None):
         super().__init__(parent)
         self.ctrl = ctrl
-        self.live_widget = LiveWidget()
+        self.live_widget = SightingSky3D()
+        self.live_widget.set_tex(ctrl.tex)
 
         self.lbl_clock = QLabel()
         self.lbl_clock.setStyleSheet("font-family: Consolas; font-size: 22px; color: %s;" % theme.OK)
@@ -700,18 +702,14 @@ class LivePage(QWidget):
         ll.addWidget(self.lbl_clock_sub)
         ll.addWidget(self.lbl_verdict)
         ll.addWidget(self.lbl_zone)
-        ll.addWidget(self.tbl)
+        ll.addWidget(self.tbl, 1)
+        l_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.tbl.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tbl.setMinimumHeight(240)
+        self.tbl.verticalHeader().setDefaultSectionSize(26)
 
-        right = QScrollArea()
-        right.setWidgetResizable(True)
+        right = l_group
         right.setMinimumWidth(320)
-        right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        right.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        holder = QWidget()
-        rl = QVBoxLayout(holder)
-        rl.addWidget(l_group)
-        rl.addStretch(1)
-        right.setWidget(holder)
 
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.live_widget)

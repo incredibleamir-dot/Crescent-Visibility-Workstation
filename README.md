@@ -12,9 +12,10 @@ tabbed views, dock-style tables and vector-rendered charts.
 python main.py
 ```
 
-Needs Python 3.11+, with `PySide6`, `numpy` and `pandas` (install once with
-`pip install -r requirements.txt`). The `solarsystem` astronomy library is
-vendored in `vendor/`, so no astronomy dependency is needed.
+Needs Python 3.11+, with `PySide6`, `PyVista` (incl. `pyvistaqt`), `numpy` and
+`pandas` (install once with `pip install -r requirements.txt`). The
+`solarsystem` astronomy library is vendored in `vendor/`, so no astronomy
+dependency is needed. `PyVista`/`vtk` power the interactive 3D Live sky.
 
 ## Repository
 
@@ -30,7 +31,7 @@ vendored in `vendor/`, so no astronomy dependency is needed.
 | 3 / E | Equation | lag time vs arc of light against the visibility boundary curve |
 | 4 / H | Threshold | box-and-whisker of minimum observed values for one parameter (cycle with X) |
 | 5 / V | Verify | check our math against NASA/JPL HORIZONS and against real recorded sightings |
-| 6 / L | Live | the Sun-Earth-Moon system right now (updates every 5 s) |
+| 6 / L | Live | an interactive 3D altitude–azimuth sighting sky of the Sun and Moon right now (updates every 5 s) |
 
 Every analysis chart shows a **white highlight ring** marking the evening you
 have selected, and the ring follows you as you step through dates.
@@ -48,6 +49,10 @@ have selected, and the ring follows you as you step through dates.
 | Verification | Live |
 |---|---|
 | ![Verification](assets/screenshots/shot-verify.png) | ![Live](assets/screenshots/shot-live.png) |
+
+| 3D Alt–Az sighting sky (Live) |
+|---|
+| ![3D Alt-Az sighting sky](assets/screenshots/shot-skyview-3d.png) |
 
 | Ramadan & Eid dates | User Guide |
 |---|---|
@@ -120,14 +125,25 @@ responsive while they work.
 
 ## Live view
 
-A top-down diagram of the Sun-Earth-Moon system recomputed from your clock
-every 5 seconds (or the 24 h scrubber): the Moon's orbit, the arc of the orbit
-where the Moon is above the horizon at your location, the Moon at its true
-phase, and the Earth shaded day/night with your location marked. A 24 h slider
-gives the whole night, with **NOW** to snap back to the live instant. Textured
-from the bundled `assets/` maps (a satellite photo for the LIVE Earth globe, a
-Natural Earth black-and-white line map behind the visibility grid) when
-available, with vector fallback.
+An **interactive 3D Altitude–Azimuth Sighting Sky** of the Moon and Sun as seen
+from the observer's location, rendered with PyVista and recomputed from your
+clock every 5 seconds, or scrubbed through the 24 h with the slider (**NOW**
+snaps back to the live instant).
+
+The hemisphere around you is drawn in the local Alt–Az frame: compass
+cardinals (N highlighted), altitude rings, an azimuth grid, the horizon rim and
+a translucent earth-textured ground. The Sun is a glowing sphere; the Moon is
+shown at its **true phase** — the lit crescent is shaded from the Sun's
+direction, so it correctly faces and thins as the real Moon does. Observer →
+Sun / Moon lines, a dashed Sun–Moon separation link, and trails the two bodies
+trace over ±3 h (toggle Moon/Sun path) help read the geometry at a glance.
+
+Screen-facing readout boxes (Sun / Moon name, Alt, Az, plus the observer's
+location **name and Lat/Lon**) always face the viewer. Camera buttons (Reset,
+Top, North, South, East, West) plus click-drag rotate / scroll-zoom give full
+control, and the **Grid**, **Moon path**, **Sun path** and **Labels** toggles
+declutter the scene. All values come from the same astronomy engine that drives
+every other view, so the Live sky can never disagree with the Sighting verdict.
 
 ## Global visibility map (Sighting view, key G)
 
@@ -148,7 +164,8 @@ main.py                 entry point
 moonwatch/
   theme.py              palette, stylesheet, fonts
   controller.py         shared state + computation threads
-  charts.py             vector canvas widgets (sky, altitude, scatter, box, live)
+  charts.py             vector canvas widgets (sky, altitude, scatter, box)
+  sighting_sky_3d.py    interactive 3D Alt–Az sighting sky (PyVista)
   pages.py              the six workspace pages
   dialogs.py            date & location, Ramadan/Eid dates, About
   app_window.py         main window, menus, toolbar, shortcuts
