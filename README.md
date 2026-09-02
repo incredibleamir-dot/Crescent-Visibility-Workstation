@@ -57,7 +57,7 @@ have selected, and the ring follows you as you step through dates.
 
 | 3D sky MP4 export (24 h orbit) |
 |---|
-| <video src="assets/screenshots/vid-live-3D.mp4" controls></video> |
+| ![3D sky MP4 demo](assets/screenshots/vid-live-3D.gif) |
 
 | Ramadan & Eid dates | User Guide |
 |---|---|
