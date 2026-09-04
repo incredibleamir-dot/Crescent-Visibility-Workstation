@@ -32,7 +32,7 @@ dependency is needed. `PyVista`/`vtk` power the interactive 3D Live sky, and
 | 3 / E | Equation | lag time vs arc of light against the visibility boundary curve |
 | 4 / H | Threshold | box-and-whisker of minimum observed values for one parameter (cycle with X) |
 | 5 / V | Verify | check our math against NASA/JPL HORIZONS and against real recorded sightings |
-| 6 / L | Live | an interactive 3D altitude–azimuth sighting sky of the Sun and Moon right now (updates every 5 s) |
+| 6 / L | Live | an interactive 3D altitude–azimuth sighting sky of the Sun and Moon right now (updates every 5 s), with a pannable 2D horizon sky map of the Sun, Moon & planets switchable from the View selector |
 
 Every analysis chart shows a **white highlight ring** marking the evening you
 have selected, and the ring follows you as you step through dates.
@@ -54,6 +54,10 @@ have selected, and the ring follows you as you step through dates.
 | 3D Alt–Az sighting sky (Live) |
 |---|
 | ![3D Alt-Az sighting sky](assets/screenshots/shot-skyview-3d.png) |
+
+| 2D Horizon sky map (Live) |
+|---|
+| ![2D Horizon sky map](assets/screenshots/shot-skymap.png) |
 
 | 3D sky MP4 export (24 h orbit) |
 |---|
@@ -155,6 +159,20 @@ From **Tools ▸ Export animation (GIF)...** you can also export the 3D sky as a
 through a complete 24-hour Sun/Moon cycle while the camera slowly orbits 360°,
 and the window closes itself when the file is written (requires OpenCV).
 
+### Horizon sky map (Live view)
+
+The **View** selector above the 3D sky switches to a **2D Horizon Sky Map** — a
+cylindrical *azimuth × altitude* panorama of the whole sky around you, panning
+freely across the full 360° with click-drag, the mouse wheel, or the arrow and
+compass buttons. It is real-time (recomputed with the same 5 s clock): the **Sun**,
+**Moon** at its true phase, and the bright planets (Mercury, Venus, Mars, Jupiter,
+Saturn) are drawn at their live positions with labels, each with its **day-long
+altitude path** traced across the sky, plus the **ecliptic** line. The background
+**transitions seamlessly from day to twilight to night** as the Sun moves, with a
+warm glow resting on the horizon toward the Sun at twilight; compass directions are
+marked below the horizon. As with the 3D sky, every value comes from the same
+astronomy engine, so the map always agrees with the rest of the app.
+
 ## Global visibility map (Sighting view, key G)
 
 Switch the Sighting map to **Global** to see, for the same evening, which
@@ -176,6 +194,7 @@ moonwatch/
   controller.py         shared state + computation threads
   charts.py             vector canvas widgets (sky, altitude, scatter, box)
   sighting_sky_3d.py    interactive 3D Alt–Az sighting sky (PyVista)
+  sky_map.py            2D pannable horizon sky map (Live view)
   pages.py              the six workspace pages
   dialogs.py            date & location, Ramadan/Eid dates, About
   app_window.py         main window, menus, toolbar, shortcuts

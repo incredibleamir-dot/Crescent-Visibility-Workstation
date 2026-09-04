@@ -1,8 +1,4 @@
 """Scientific theme: colours, fonts and the global stylesheet.
-
-The palette is deliberately a light, corporate "lab bench" look - white
-panels, steel-blue accents and grey grid lines - the opposite of the neon
-HUD of the original pygame build.
 """
 
 from PySide6.QtGui import QColor, QFont

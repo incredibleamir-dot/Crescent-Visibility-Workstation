@@ -42,7 +42,7 @@ VENDOR = os.path.join(LIB_DIR, "vendor")
 if os.path.isdir(VENDOR) and VENDOR not in sys.path:
     sys.path.insert(0, VENDOR)
 
-from solarsystem import Moon          # noqa: E402
+from solarsystem import Moon, Geocentric  # noqa: E402
 from solarsystem.functions import normalize  # noqa: E402
 
 # Altitude of the disk centre at rise/set: the upper limb touches the horizon
@@ -217,6 +217,50 @@ def sun_alt_az(jd, lat, lon):
 def moon_alt_az(jd, lat, lon):
     lon_m, lat_m, _ = moon_topocentric(jd, lat, lon)
     return ecl2alt_az(lon_m, lat_m, jd, lat, lon)
+
+
+# ---------------------------------------------------------------------------
+# Planets (via the vendored solarsystem library)
+# ---------------------------------------------------------------------------
+
+PLANET_NAMES = ("Mercury", "Venus", "Mars", "Jupiter", "Saturn",
+                "Uranus", "Neptune")
+
+_PLANET_POS = {}
+
+
+def planet_ecliptic(jd, name):
+    """Geocentric ecliptic (lon, lat, dist AU) of a planet at Julian date ``jd``.
+
+    Positions come from the vendored ``solarsystem`` package, so no network is
+    needed and results agree with the rest of this module's coordinate frame.
+    Distances are in AU (Earth radii for the Moon; here the library returns
+    AU).  Note: the library's returned elements are degrees / AU.
+    """
+    p = _planet_positions(jd)
+    return p[name]
+
+
+def _planet_positions(jd):
+    key = round(jd, 4)
+    if key in _PLANET_POS:
+        return _PLANET_POS[key]
+    dt = dt_utc_from_jd(jd)
+    minute = dt.minute + dt.second / 60.0
+    g = Geocentric(year=dt.year, month=dt.month, day=dt.day,
+                   hour=dt.hour, minute=minute, UT=0, dst=0,
+                   plane="ecliptic", precession=True)
+    res = g.position()
+    if len(_PLANET_POS) > 1024:
+        _PLANET_POS.clear()
+    _PLANET_POS[key] = res
+    return res
+
+
+def planet_alt_az(jd, name, lat, lon):
+    """Local (alt, az) of a named planet for an observer at (lat, lon)."""
+    lon_p, lat_p, _ = planet_ecliptic(jd, name)
+    return ecl2alt_az(lon_p, lat_p, jd, lat, lon)
 
 
 def ecl2radec(ecl_lon, ecl_lat, jd):

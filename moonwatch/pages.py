@@ -18,6 +18,7 @@ from .charts import (SkyWidget, AltitudeChartWidget, ScatterWidget,
                      BoxPlotWidget, GlobalVisibilityWidget,
                      crescent_pixmap, crescent_rot, F)
 from .sighting_sky_3d import SightingSky3D
+from .sky_map import HorizonSkyWidget
 from .controller import fmt_date, fmt_time, fmt_age_h, coord_str, MABIMS_ARCL, MABIMS_ALT, DANJON_ARCL
 
 
@@ -674,6 +675,18 @@ class LivePage(QWidget):
         self.live_widget = SightingSky3D()
         self.live_widget.set_tex(ctrl.tex)
 
+        self.horizon_widget = HorizonSkyWidget()
+        self.horizon_widget.set_tex(ctrl.tex)
+
+        view_stack = QStackedWidget()
+        view_stack.addWidget(self.live_widget)
+        view_stack.addWidget(self.horizon_widget)
+        self.view_stack = view_stack
+
+        self.cmb_view = QComboBox()
+        self.cmb_view.addItems(["3D Sighting Sky", "Horizon sky map"])
+        self.cmb_view.currentIndexChanged.connect(self._on_view_changed)
+
         self.lbl_clock = QLabel()
         self.lbl_clock.setStyleSheet("font-family: Consolas; font-size: 22px; color: %s;" % theme.OK)
         self.lbl_clock_sub = QLabel("local time - updates every 5 s")
@@ -711,8 +724,19 @@ class LivePage(QWidget):
         right = l_group
         right.setMinimumWidth(320)
 
+        view_panel = QWidget()
+        vpl = QVBoxLayout(view_panel)
+        vpl.setContentsMargins(0, 0, 0, 0)
+        vpl.setSpacing(4)
+        header = QHBoxLayout()
+        header.addWidget(QLabel("View"))
+        header.addWidget(self.cmb_view)
+        header.addStretch(1)
+        vpl.addLayout(header)
+        vpl.addWidget(self.view_stack, 1)
+
         split = QSplitter(Qt.Horizontal)
-        split.addWidget(self.live_widget)
+        split.addWidget(view_panel)
         split.addWidget(right)
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 1)
@@ -748,7 +772,7 @@ class LivePage(QWidget):
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
-        self._debounce.setInterval(120)
+        self._debounce.setInterval(30)
         self._debounce.timeout.connect(self._apply_slider)
         self.live_slider.valueChanged.connect(self._on_slider)
         self.btn_now.clicked.connect(self._go_now)
@@ -759,6 +783,9 @@ class LivePage(QWidget):
 
         ctrl.dataChanged.connect(self.update_view)
         self.update_view()
+
+    def _on_view_changed(self, index):
+        self.view_stack.setCurrentIndex(index)
 
     def _on_slider(self, minutes):
         self.lbl_sim.setText("%02d:%02d" % (minutes // 60, minutes % 60))
@@ -783,6 +810,7 @@ class LivePage(QWidget):
         if d is None:
             return
         self.live_widget.set_data(d, c.tex)
+        self.horizon_widget.set_data(d, c.tex)
         self.lbl_clock.setText(d["local"].strftime("%H:%M:%S"))
         minutes = d["local"].hour * 60 + d["local"].minute
         self.live_slider.blockSignals(True)

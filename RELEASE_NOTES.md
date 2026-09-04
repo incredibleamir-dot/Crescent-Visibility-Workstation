@@ -1,11 +1,24 @@
 # Moon Watch - Crescent Visibility Workstation — Release Notes
 
-**Version 1.2.0** · PySide6 desktop app for predicting and analysing new-crescent
+**Version 1.3.0** · PySide6 desktop app for predicting and analysing new-crescent
 visibility (Ramadan / Eid) from any location.
 
 > Repository: [Crescent-Visibility-Workstation](https://github.com/incredibleamir-dot/Crescent-Visibility-Workstation)
 
 ---
+
+## What's new in v1.3.0
+
+- **2D Horizon Sky Map** (new, Live view): a pannable 360° azimuth–altitude panorama of
+  the sky, toggled from the 3D sighting sky with the **View** selector. The Sun, Moon and
+  the bright planets (Mercury, Venus, Mars, Jupiter, Saturn) appear at their live positions
+  with labels, along with each body's day-long altitude path and the ecliptic line.
+- **Pan the horizon** like turning around: click-drag, mouse wheel, or the arrow / cardinal
+  buttons; compass directions are marked below the horizon line.
+- **Seamless day→twilight→night background**: the sky gradient follows the Sun, including a
+  warm glow on the horizon toward the Sun at twilight.
+- Built on the same astronomy engine as the rest of the app, so the map always agrees with
+  the other views.
 
 ## What's new in v1.2.0
 

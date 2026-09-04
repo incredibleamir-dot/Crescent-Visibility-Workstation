@@ -1,7 +1,21 @@
 # Changelog
 
-## [1.2.0] - 2026-09-02
+## [1.3.0] - 2026-09-04
 
+### Added
+- **2D Horizon Sky Map** in the Live view: a pannable 360° azimuth–altitude panorama
+  of the sky around the observer, toggled from the existing 3D sighting sky with the
+  **View** selector:
+  - Sun, Moon and the bright planets (Mercury, Venus, Mars, Jupiter, Saturn) drawn at
+    their live positions with labels, plus their day-long altitude paths and the ecliptic.
+  - Pan across the full 360° by click-drag, mouse wheel, or the arrow / cardinal buttons;
+    compass directions are marked below the horizon line.
+  - The background shifts **seamlessly from day to twilight to night** as the Sun moves,
+    with a warm glow on the horizon toward the Sun at twilight.
+- All values come from the same astronomy engine as the 3D sky and every other view.
+
+
+## [1.2.0] - 2026-09-02
 ### Added
 - **Interactive 3D Altitude–Azimuth Sighting Sky** in the Live view (replaces the old
   flat 2D Sun–Earth–Moon diagram), rendered with PyVista / PyVistaQt:
