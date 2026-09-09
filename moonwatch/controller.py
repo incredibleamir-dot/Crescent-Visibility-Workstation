@@ -24,10 +24,6 @@ from moonwatch import globalmap
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-MABIMS_ARCL = 6.4
-MABIMS_ALT = 3.0
-DANJON_ARCL = 7.0
-
 
 def _run_check(q, kind, date, lat, lon, tz):
     """Worker sub-process: runs one verification check and ships the result.

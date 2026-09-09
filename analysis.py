@@ -29,11 +29,11 @@ def load_data():
 
 
 def _points(df, x, y):
-    pts = []
-    for _, row in df.iterrows():
-        pts.append((float(row[x]), float(row[y]),
-                    str(row["V"]), str(row["M"])))
-    return pts
+    xs = df[x].to_numpy(dtype=float)
+    ys = df[y].to_numpy(dtype=float)
+    vs = df["V"].to_numpy(dtype=str)
+    ms = df["M"].to_numpy(dtype=str)
+    return list(zip(xs.tolist(), ys.tolist(), vs.tolist(), ms.tolist()))
 
 
 def condition_analysis(x="ArcL", y="MAlt", conditionx=6.4, conditiony=3.0,

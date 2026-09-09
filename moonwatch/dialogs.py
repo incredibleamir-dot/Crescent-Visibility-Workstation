@@ -4,8 +4,6 @@ import datetime
 import math
 import os
 
-import numpy as np
-
 from PySide6.QtCore import Qt, QDate, QUrl, QTimer
 from PySide6.QtGui import QImage, QTextDocument, QColor
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
@@ -125,7 +123,7 @@ class LocationDateDialog(QDialog):
         tz = self.tz_spin.value()
         idx = self.city_combo.currentIndex()
         name = self.city_combo.currentText()
-        if idx == 0 or any(name == c[0] for c in CITIES) is False:
+        if idx == 0:
             name = "Custom"
         qd = self.date_edit.date()
         when = datetime.datetime(qd.year(), qd.month(), qd.day())

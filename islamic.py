@@ -65,6 +65,15 @@ def _fmt_ah(month, year):
     return "%s %d AH" % (MONTH_NAMES[month - 1], year)
 
 
+def _pick(rows, today, offset_days):
+    """Single closest previous and next (year, civil_date) around ``today``."""
+    items = [(y, day1 + timedelta(days=offset_days))
+             for y, day1 in sorted(rows, key=lambda r: r[1])]
+    prevs = [(y, d) for (y, d) in items if d <= today]
+    nexts = [(y, d) for (y, d) in items if d > today]
+    return (prevs[-1] if prevs else None, nexts[0] if nexts else None)
+
+
 def _pick_many(rows, today, offset_days, n=6):
     """Sorted (year, civil_date) pairs around ``today`` - the closest n each way."""
     items = [(y, day1 + timedelta(days=offset_days))

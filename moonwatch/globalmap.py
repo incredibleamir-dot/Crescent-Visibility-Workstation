@@ -228,21 +228,3 @@ def classify(crit, mh, ark, av, w, ark_b, nolight):
     out[vis] = VISIBLE
     out[bor] = BORDERLINE
     return out
-
-
-def _run_global_map(q, date):
-    """Worker sub-process entry: compute the grid and ship it back."""
-    import moonwatch.globalmap as _g
-    try:
-        def _progress(frac):
-            try:
-                q.put(("progress", frac))
-            except Exception:
-                pass
-        data = _g.compute(date, progress=_progress)
-        q.put(("done", data))
-    except Exception as exc:
-        try:
-            q.put(("error", str(exc)))
-        except Exception:
-            pass

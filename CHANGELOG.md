@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.3.1] - 2026-09-09
+
+### Fixed
+- **Live page layout on first paint**: content panels now balance immediately on
+  construction, not only after a resize, so the initial split ratio matches what
+  the user sees after the first drag.
+- **Live time slider no longer triggers a day simulation while the page is being
+  built**: the slider / debounce / NOW connections are wired only after the view is
+  first populated, so the 24 h scrubber cannot fire `set_live_sim` during startup.
+
+### Performance
+- **New-moon conjunction search** (`astronomy.conjunction_before`): the bisection
+  no longer re-evaluates the elongation of the lower bound 60 times per candidate;
+  the cached value is reused, cutting per-lunation root-finding work roughly in
+  half.  Results remain memoised per ~6-hour bucket.
+- **World-grid snapshots** (`animation.snapshot_grid`): the Sun's altitude is now
+  checked *before* computing the (far more expensive) topocentric Moon position,
+  so cells still in daylight skip the Moon work entirely - identical output, about
+  half the CPU for a full world frame.
+- **Analysis point extraction** (`analysis._points`): replaced a `iterrows()` loop
+  with vectorised numpy extraction (same result tuple-per-row).
+- **Planet position cache** (`astronomy._planet_positions`): the overflow policy
+  stopped clearing the whole ~1 MB cache and now evicts one least-recently-used
+  entry at a time (bounded at 1,024 entries), keeping inter-date lookups warm.
+
+### Cleanup
+- Removed dead `LiveWidget` (flat 2D Sun-Earth-Moon painter) and its
+  `astronomy_ecl2alt_az` helper from `moonwatch/charts.py` - replaced by the 3D sky
+  and 2D horizon map in 1.2/1.3.
+- Removed the duplicated worker `globalmap._run_global_map` (the controller-owned
+  sub-process entry was the one actually used).
+- `moonwatch/controller.py` no longer redefines the MABIMS/Danjon thresholds that
+  already live in `astronomy.py`; pages read them from the single source.
+- Dropped the redundant `sys.path` bootstrap and the unused `PLANET_NAMES` constant
+  from `astronomy.py`, and an unused `numpy` import from `moonwatch/dialogs.py`.
+
+
 ## [1.3.0] - 2026-09-04
 
 ### Added

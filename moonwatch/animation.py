@@ -87,17 +87,16 @@ def snapshot_grid(date, lat, lon, tz, offset_min, grid_step=DEFAULT_GRID_STEP):
         la = float(lats[i])
         for j in range(nlo):
             lo = float(lons[j])
+            s_alt, _ = astronomy.sun_alt_az(jd, la, lo)
+            if s_alt >= -6.0:
+                continue        # not dark enough to matter; nolight stays True
+            nolight[i, j] = False
             try:
                 lon_m, lat_m, dist_m = astronomy.moon_topocentric(jd, la, lo)
                 m_alt, _ = astronomy.moon_alt_az(jd, la, lo)
             except Exception:
                 lon_m, lat_m, dist_m = astronomy.moon_geocentric(jd)
                 m_alt, _ = astronomy.ecl2alt_az(lon_m, lat_m, jd, la, lo)
-            s_alt, _ = astronomy.sun_alt_az(jd, la, lo)
-            if s_alt >= -6.0:
-                nolight[i, j] = True        # not dark enough to matter
-                continue
-            nolight[i, j] = False
             a = astronomy.elongation(lon_m, lat_m, lon_s, lat_s)
             mh[i, j] = m_alt
             ark[i, j] = a

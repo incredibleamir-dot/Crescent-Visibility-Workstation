@@ -36,11 +36,7 @@ import datetime as _dt
 from datetime import datetime, timedelta
 
 LIB_DIR = os.path.dirname(os.path.abspath(__file__))
-if LIB_DIR not in sys.path:
-    sys.path.insert(0, LIB_DIR)
 VENDOR = os.path.join(LIB_DIR, "vendor")
-if os.path.isdir(VENDOR) and VENDOR not in sys.path:
-    sys.path.insert(0, VENDOR)
 
 from solarsystem import Moon, Geocentric  # noqa: E402
 from solarsystem.functions import normalize  # noqa: E402
@@ -223,10 +219,8 @@ def moon_alt_az(jd, lat, lon):
 # Planets (via the vendored solarsystem library)
 # ---------------------------------------------------------------------------
 
-PLANET_NAMES = ("Mercury", "Venus", "Mars", "Jupiter", "Saturn",
-                "Uranus", "Neptune")
-
 _PLANET_POS = {}
+_PLANET_POS_ORDER = []
 
 
 def planet_ecliptic(jd, name):
@@ -251,9 +245,11 @@ def _planet_positions(jd):
                    hour=dt.hour, minute=minute, UT=0, dst=0,
                    plane="ecliptic", precession=True)
     res = g.position()
-    if len(_PLANET_POS) > 1024:
-        _PLANET_POS.clear()
     _PLANET_POS[key] = res
+    _PLANET_POS_ORDER.append(key)
+    while len(_PLANET_POS_ORDER) > 1024:
+        old = _PLANET_POS_ORDER.pop(0)
+        _PLANET_POS.pop(old, None)
     return res
 
 
@@ -420,12 +416,15 @@ def conjunction_before(jd):
         d = _signed_elongation(t)
         if prev_d * d < 0.0 and abs(prev_d) < 90.0 and abs(d) < 90.0:
             lo, hi = prev_t, t
+            lo_d = prev_d
             for _ in range(60):
                 mid = (lo + hi) / 2.0
-                if _signed_elongation(lo) * _signed_elongation(mid) <= 0:
+                mid_d = _signed_elongation(mid)
+                if lo_d * mid_d <= 0:
                     hi = mid
                 else:
                     lo = mid
+                    lo_d = mid_d
             last = (lo + hi) / 2.0
         prev_t, prev_d = t, d
         t += 0.125

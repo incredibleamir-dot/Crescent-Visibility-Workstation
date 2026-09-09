@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                QAbstractItemView, QStackedWidget)
 
 from . import theme
+import astronomy
 from .charts import (SkyWidget, AltitudeChartWidget, ScatterWidget,
                      BoxPlotWidget, GlobalVisibilityWidget,
                      crescent_pixmap, crescent_rot, F)
 from .sighting_sky_3d import SightingSky3D
 from .sky_map import HorizonSkyWidget
-from .controller import fmt_date, fmt_time, fmt_age_h, coord_str, MABIMS_ARCL, MABIMS_ALT, DANJON_ARCL
+from .controller import fmt_date, fmt_time, fmt_age_h, coord_str
 
 
 def panel_frame(widget):
@@ -308,8 +309,10 @@ class SightingPage(QWidget):
             return
         rows = [
             ("MABIMS 2023", r["mabims"],
-             "ArcL>=%.1f & alt>=%.1f" % (MABIMS_ARCL, MABIMS_ALT)),
-            ("Danjon", r["danjon"], "ArcL>=%.1f" % DANJON_ARCL),
+             "ArcL>=%.1f & alt>=%.1f" % (astronomy.MABIMS_ARC_L_MIN,
+                                          astronomy.MABIMS_ALT_MIN)),
+            ("Danjon", r["danjon"],
+             "ArcL>=%.1f" % astronomy.DANJON_ARC_L_MIN),
             ("Odeh 2006", r["zone"] in ("A", "B", "C"), "zone %s" % r["zone"]),
         ]
         self._fill_crit_rows([(n, ("PASS" if ok else "FAIL"), note)
@@ -363,6 +366,7 @@ def _install_resize(page, split):
         _balance(split)
 
     page.resizeEvent = resize
+    _balance(split)
 
 
 # --------------------------------------------------------------------------- analysis
@@ -773,9 +777,6 @@ class LivePage(QWidget):
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
         self._debounce.setInterval(30)
-        self._debounce.timeout.connect(self._apply_slider)
-        self.live_slider.valueChanged.connect(self._on_slider)
-        self.btn_now.clicked.connect(self._go_now)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._on_tick)
@@ -783,6 +784,10 @@ class LivePage(QWidget):
 
         ctrl.dataChanged.connect(self.update_view)
         self.update_view()
+
+        self._debounce.timeout.connect(self._apply_slider)
+        self.live_slider.valueChanged.connect(self._on_slider)
+        self.btn_now.clicked.connect(self._go_now)
 
     def _on_view_changed(self, index):
         self.view_stack.setCurrentIndex(index)
