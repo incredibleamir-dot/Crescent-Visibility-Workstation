@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.4.0] - 2026-09-14
+
+### Added
+- **Phone link (Termux, no APK)**: `phone-app/termux/aim.py` streams the phone's
+  rotation-vector orientation + location to the desktop app over UDP, using the
+  same wire protocol as the old Kivy app.  No build step needed — run it
+  directly in F-Droid Termux.
+  - Default **Ludhiana** location (30.900965, 75.857275, 262 m) sent automatically
+    so GPS is not required; override with `--lat/--lon/--alt`, or pass `--gps` for
+    live GPS (60 s timeout, then network-provider fallback, then an interactive
+    manual-coordinate prompt).
+  - Automatic LAN discovery over both broadcast addresses (limited and /24
+    subnet), retrying for up to 5 s; falls back to an interactive manual-IP
+    prompt if nothing is found.
+  - Vendor-agnostic sensor picker: queries `termux-sensor -a` and matches any
+    sensor whose name contains *rotation vector*, so Samsung-prefixed names
+    (e.g. "Samsung Rotation Vector Sensor") work without hard-coding.
+- **Desktop phone simulator** (`tools/phone_sim.py`): a standalone PySide6 tool
+  that streams the exact same `orient` / `ping` / `loc` traffic, driven by a
+  mouse-draggable cube (orange face = back camera).  Run it on the same machine
+  as the desktop app to exercise the phone-link pipeline without a phone.
+- Desktop **"Drive sky map from phone"** checkbox now defaults to checked.
+- Desktop *Phone link* box now shows a large **"Desktop IP for the phone"**
+  label so the IP can be read on a phone screen, and flips to
+  "streaming from \<ip\>" the moment a discovery round-trip completes.
+
+
 ## [1.3.1] - 2026-09-09
 
 ### Fixed
