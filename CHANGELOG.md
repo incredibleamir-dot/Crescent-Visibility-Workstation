@@ -3,10 +3,8 @@
 ## [1.4.0] - 2026-09-14
 
 ### Added
-- **Phone link (Termux, no APK)**: `phone-app/termux/aim.py` streams the phone's
-  rotation-vector orientation + location to the desktop app over UDP, using the
-  same wire protocol as the old Kivy app.  No build step needed — run it
-  directly in F-Droid Termux.
+- **Phone link (Termux)**: `phone-app/termux/aim.py` streams the phone's
+  rotation-vector orientation + location to the desktop app over UDP.
   - Default **Ludhiana** location (30.900965, 75.857275, 262 m) sent automatically
     so GPS is not required; override with `--lat/--lon/--alt`, or pass `--gps` for
     live GPS (60 s timeout, then network-provider fallback, then an interactive
