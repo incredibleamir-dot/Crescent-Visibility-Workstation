@@ -1,10 +1,11 @@
 """2D horizon sky map for the LIVE page.
 
 A cylindrical (azimuth x altitude) panorama that can be panned across the full
-360 degrees, like turning the observer around.  The Sun, Moon and bright
-planets are drawn at their live positions together with their altitude paths,
-and the sky gradient follows the Sun so the background shifts seamlessly from
-day to twilight to night.
+360 degrees of azimuth and from the horizon up to the zenith (0-90 degrees of
+altitude), like turning and tilting the observer's head.  The Sun, Moon and
+bright planets are drawn at their live positions together with their altitude
+paths, and the sky gradient follows the Sun so the background shifts
+seamlessly from day to twilight to night.
 
 The widget re-uses the astronomy layer (``sun_alt_az``, ``moon_alt_az``,
 ``planet_alt_az``, ``ecl2alt_az``) so it shows exactly the same positions the
@@ -89,13 +90,15 @@ class HorizonSkyWidget(QWidget):
     """Renders the sky map plus its pan / view controls."""
 
     SPAN = 130.0            # degrees of azimuth visible at once
-    ALT_MAX = 28.0          # degrees at the top of the sky
-    ALT_MIN = -4.0          # degrees at the bottom of the sky
+    VSPAN = 32.0            # degrees of altitude visible at once
+    ALT_MIN = -4.0          # deepest altitude the bottom of the view can reach
+    ALT_MAX = 90.0          # zenith; highest altitude the top of the view can reach
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.live = None
         self.az_center = 90.0
+        self.alt_center = self.ALT_MIN + self.VSPAN / 2.0
         self._tex = None
 
         lay = QVBoxLayout(self)
@@ -116,7 +119,15 @@ class HorizonSkyWidget(QWidget):
                          ("\u2192", lambda: self.pan(45))):
             b = QPushButton(text)
             b.setFixedSize(28, 24)
-            b.setToolTip("Pan the horizon (or drag the map)")
+            b.setToolTip("Pan around the horizon (or drag the map)")
+            b.setStyleSheet(btn_style)
+            b.clicked.connect(fn)
+            bar.addWidget(b)
+        for text, fn in (("\u2191", lambda: self.vpan(15)),
+                         ("\u2193", lambda: self.vpan(-15))):
+            b = QPushButton(text)
+            b.setFixedSize(28, 24)
+            b.setToolTip("Pan the sky up/down (or drag the map)")
             b.setStyleSheet(btn_style)
             b.clicked.connect(fn)
             bar.addWidget(b)
@@ -157,10 +168,31 @@ class HorizonSkyWidget(QWidget):
     def pan(self, deg):
         self.set_center(self.az_center + deg)
 
+    def set_alt_center(self, alt):
+        lo = -(self.VSPAN / 2.0)          # horizon lies along the bottom edge
+        hi = self.ALT_MAX - self.VSPAN / 2.0
+        self.alt_center = max(lo, min(hi, alt))
+        self.canvas.alt_center = self.alt_center
+        self._update_label()
+        self.canvas.update()
+
+    def vpan(self, deg):
+        self.set_alt_center(self.alt_center + deg)
+
+    def set_aim(self, az, alt):
+        """Point the view centre at an (azimuth, altitude) aim, e.g. the
+        direction the phone's camera points in real space."""
+        self.set_center(az)
+        self.set_alt_center(alt)
+
     def _update_label(self):
         a = self.az_center % 360.0
         name = _CARDINALS[int(round(a / 45.0)) % 8]
-        self.lbl_view.setText("Looking %s  -  %03.0f\u00b0 azimuth" % (name, a))
+        lo = self.alt_center - self.VSPAN / 2.0
+        hi = self.alt_center + self.VSPAN / 2.0
+        self.lbl_view.setText(
+            "Looking %s  -  %03.0f\u00b0 az   \u00b7   alt %02.0f\u00b0-%02.0f\u00b0"
+            % (name, a, lo, hi))
 
 
 class _HorizonCanvas(QWidget):
@@ -171,6 +203,7 @@ class _HorizonCanvas(QWidget):
         self.owner = owner
         self.live = None
         self.az_center = 90.0
+        self.alt_center = owner.alt_center
         self._paths = {}
         self._path_key = None
         self._sky_pm = None
@@ -189,8 +222,8 @@ class _HorizonCanvas(QWidget):
 
     def _alt_to_y(self, alt):
         h = self.height()
-        rng = self.owner.ALT_MAX - self.owner.ALT_MIN
-        return h - (alt - self.owner.ALT_MIN) / rng * h
+        vb = self.alt_center - self.owner.VSPAN / 2.0
+        return h - (alt - vb) / self.owner.VSPAN * h
 
     # ------------------------------------------------------------- paths
     def compute_paths(self, live):
@@ -237,24 +270,27 @@ class _HorizonCanvas(QWidget):
     # ------------------------------------------------------------- events
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self._drag_last = e.position().x()
+            self._drag_last = e.position()
             self.setCursor(Qt.ClosedHandCursor)
 
     def mouseMoveEvent(self, e):
         if self._drag_last is None:
             self.setCursor(Qt.OpenHandCursor)
             return
-        dx = e.position().x() - self._drag_last
-        self._drag_last = e.position().x()
-        if self.width():
+        pos = e.position()
+        dx = pos.x() - self._drag_last.x()
+        dy = pos.y() - self._drag_last.y()
+        self._drag_last = pos
+        if self.width() and self.height():
             self.owner.pan(-dx / self.width() * self.owner.SPAN)
+            self.owner.vpan(dy / self.height() * self.owner.VSPAN)
 
     def mouseReleaseEvent(self, e):
         self._drag_last = None
         self.unsetCursor()
 
     def wheelEvent(self, e):
-        self.owner.pan(-e.angleDelta().y() / 120.0 * 30.0)
+        self.owner.vpan(e.angleDelta().y() / 120.0 * 15.0)
 
     # ------------------------------------------------------------- paint
     def paintEvent(self, _ev):
@@ -281,7 +317,7 @@ class _HorizonCanvas(QWidget):
         p.end()
 
     def _draw_sky(self, p, w, h, sun_alt):
-        key = (w, h, int(round(sun_alt * 2.0)))
+        key = (w, h, int(round(sun_alt * 2.0)), round(self.alt_center, 1))
         if self._sky_key != key or self._sky_pm is None:
             self._sky_pm = self._build_sky_pixmap(w, h, sun_alt)
             self._sky_key = key
@@ -294,13 +330,14 @@ class _HorizonCanvas(QWidget):
         hor = _blend3(_NIGHT_HORIZON, _TWILIGHT_HORIZON, _DAY_HORIZON, wn, wt, wd)
         stops = [0.0, 0.42, 1.0]
         cols_arr = np.array([top, mid, hor], np.float32)
-        gy = max(1, int(self._alt_to_y(0.0)))
-        f = np.linspace(0.0, 1.0, gy)
-        arr = np.zeros((h, w, 3), np.float32)
-        arr[:gy, :, :] = np.column_stack(
+        vb = self.alt_center - self.owner.VSPAN / 2.0
+        vt = self.alt_center + self.owner.VSPAN / 2.0
+        alts = np.linspace(vt, vb, h)               # top row .. bottom row
+        f = np.clip(1.0 - np.clip(alts, 0.0, 90.0) / 90.0, 0.0, 1.0)
+        rows = np.column_stack(
             [np.interp(f, stops, cols_arr[:, k]) for k in range(3)]
         )[:, np.newaxis, :]
-        arr[gy:, :, :] = np.array(hor, np.float32)
+        arr = np.repeat(rows, w, axis=1)
         col = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
         img = QImage(col.data, w, h, w * 3, QImage.Format_RGB888)
         return QPixmap.fromImage(img.copy())
@@ -312,7 +349,7 @@ class _HorizonCanvas(QWidget):
             return
         gy = int(self._alt_to_y(0.0))
         x = self._az_to_x(sun_az)
-        if x is None:
+        if x is None or gy < 0 or gy > h:
             return
         if sun_alt < -8.0:
             return
@@ -392,6 +429,8 @@ class _HorizonCanvas(QWidget):
 
     def _draw_ground(self, p, w, h):
         gy = int(self._alt_to_y(-1.0))
+        if gy < 0 or gy >= h:
+            return
         p.fillRect(0, gy, w, h - gy, QColor(12, 16, 26))
         for y in range(gy, h):
             f = (y - gy) / max(1.0, h - gy)
@@ -423,21 +462,26 @@ class _HorizonCanvas(QWidget):
 
     def _draw_grid(self, p):
         w, h = self.width(), self.height()
-        for alt in (5, 10, 15, 20, 25):
-            if alt > self.owner.ALT_MAX:
-                continue
+        vb = max(0.0, self.alt_center - self.owner.VSPAN / 2.0)
+        vt = self.alt_center + self.owner.VSPAN / 2.0
+        first = int(math.ceil(vb / 5.0)) * 5
+        last = int(math.floor(vt / 5.0)) * 5
+        p.setFont(F(7))
+        for alt in range(max(5, first), min(90, last) + 1, 5):
             y = self._alt_to_y(alt)
             pen = QPen(QColor(255, 255, 255, 26), 1)
             pen.setStyle(Qt.DashLine)
             p.setPen(pen)
             p.drawLine(0, int(y), w, int(y))
-            p.setFont(F(7))
             p.setPen(QColor(255, 255, 255, 110))
             p.drawText(QRectF(3, int(y) - 9, 26, 14), Qt.AlignRight | Qt.AlignVCenter,
                        "%d\u00b0" % alt)
 
     def _draw_az_labels(self, p, w, h):
-        gy = int(self._alt_to_y(-1.0))
+        gy = self._alt_to_y(-1.0)
+        ly = gy + 4
+        if ly < 4 or ly > h - 16:
+            ly = max(4, h - 16)
         p.setFont(F(9, mono=True))
         for i, name in enumerate(_CARDINALS):
             az = i * 45.0
@@ -450,7 +494,7 @@ class _HorizonCanvas(QWidget):
                 col = QColor(160, 184, 206)
             p.setPen(col)
             wl = tw(F(9, mono=True), name)
-            p.drawText(QRectF(x - wl / 2, gy + 4, wl, 14), Qt.AlignCenter, name)
+            p.drawText(QRectF(x - wl / 2, ly, wl, 14), Qt.AlignCenter, name)
 
     def _draw_bodies(self, p):
         live = self.live

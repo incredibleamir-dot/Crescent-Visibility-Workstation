@@ -5,13 +5,17 @@ status chips when the underlying data changes.  The layout is a conventional
 desktop splitter - chart on the left, parameter/result panels on the right.
 """
 
+import time
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                QGroupBox, QLabel, QTableWidget, QSlider,
                                QTableWidgetItem, QHeaderView, QScrollArea,
                                QComboBox, QPushButton, QFrame, QSizePolicy,
-                               QAbstractItemView, QStackedWidget)
+                               QAbstractItemView, QStackedWidget,
+                               QCheckBox, QDoubleSpinBox, QSpinBox,
+                               QApplication)
 
 from . import theme
 import astronomy
@@ -21,6 +25,7 @@ from .charts import (SkyWidget, AltitudeChartWidget, ScatterWidget,
 from .sighting_sky_3d import SightingSky3D
 from .sky_map import HorizonSkyWidget
 from .controller import fmt_date, fmt_time, fmt_age_h, coord_str
+from .phone import PhoneLink, DEFAULT_PORT, lan_ip
 
 
 def panel_frame(widget):
@@ -725,8 +730,13 @@ class LivePage(QWidget):
         self.tbl.setMinimumHeight(240)
         self.tbl.verticalHeader().setDefaultSectionSize(26)
 
-        right = l_group
+        right = QWidget()
         right.setMinimumWidth(320)
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(8)
+        rl.addWidget(self._build_phone_box())
+        rl.addWidget(l_group, 1)
 
         view_panel = QWidget()
         vpl = QVBoxLayout(view_panel)
@@ -788,6 +798,164 @@ class LivePage(QWidget):
         self._debounce.timeout.connect(self._apply_slider)
         self.live_slider.valueChanged.connect(self._on_slider)
         self.btn_now.clicked.connect(self._go_now)
+
+    # ------------------------------------------------------------ phone link
+    def _build_phone_box(self):
+        self._phone_base_loc = None
+        self._phone_loc = None
+
+        box = QGroupBox(
+            "Phone link - aim the sky map with your phone (Termux)")
+        lay = QVBoxLayout(box)
+        lay.setSpacing(6)
+
+        self.lbl_phone_status = QLabel(
+            "waiting for phone\u2026 run <b>python aim.py</b> inside Termux")
+        self.lbl_phone_status.setTextFormat(Qt.RichText)
+        self.lbl_phone_status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+        self.lbl_phone_status.setWordWrap(True)
+        lay.addWidget(self.lbl_phone_status)
+
+        here = lan_ip() or "offline"
+        self.lbl_phone_ip = QLabel(
+            "Desktop IP for the phone:\n"
+            "<span style='font-size:16pt; color:%s; font-family:Consolas;'>"
+            "%s</span>" % (theme.OK, here))
+        self.lbl_phone_ip.setTextFormat(Qt.RichText)
+        self.lbl_phone_ip.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+        self.lbl_phone_ip.setWordWrap(True)
+        lay.addWidget(self.lbl_phone_ip)
+
+        self.lbl_phone_server = QLabel(
+            "server  UDP 0.0.0.0:<b>%d</b>\n"
+            "on the phone (Termux): <b>python aim.py</b>  - it auto-finds "
+            "this machine, or type the IP above if discovery misses."
+            % DEFAULT_PORT)
+        self.lbl_phone_server.setTextFormat(Qt.RichText)
+        self.lbl_phone_server.setStyleSheet("color: %s;" % theme.TEXT_MUT)
+        self.lbl_phone_server.setWordWrap(True)
+        lay.addWidget(self.lbl_phone_server)
+
+        row = QHBoxLayout()
+        self.spin_port = QSpinBox()
+        self.spin_port.setRange(1025, 65535)
+        self.spin_port.setValue(DEFAULT_PORT)
+        self.spin_port.setToolTip("UDP port the phone streams to")
+        btn_restart = QPushButton("Restart server")
+        btn_restart.setToolTip("Rebind the listener, e.g. after changing the port")
+        btn_restart.clicked.connect(self._phone_restart)
+        row.addWidget(QLabel("Port"))
+        row.addWidget(self.spin_port)
+        row.addWidget(btn_restart)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        self.chk_drive = QCheckBox("Drive sky map from phone")
+        self.chk_drive.setChecked(True)
+        self.chk_drive.setToolTip(
+            "Point the horizon sky map along the direction the phone's back "
+            "camera is aimed in real space")
+        lay.addWidget(self.chk_drive)
+
+        self.chk_gps = QCheckBox("Use phone GPS location")
+        self.chk_gps.setToolTip(
+            "Move the observer location to the phone's GPS fix; the saved "
+            "location is restored when this is switched off")
+        self.chk_gps.toggled.connect(self._on_phone_gps_toggled)
+        lay.addWidget(self.chk_gps)
+
+        nor = QHBoxLayout()
+        self.spin_north = QDoubleSpinBox()
+        self.spin_north.setRange(-180.0, 180.0)
+        self.spin_north.setDecimals(1)
+        self.spin_north.setSingleStep(0.5)
+        self.spin_north.setSuffix(" \u00b0")
+        self.spin_north.setToolTip(
+            "Added to the phone azimuth so magnetically-north readings line "
+            "up with true north on the map (local magnetic declination, "
+            "positive east)")
+        nor.addWidget(QLabel("North offset"))
+        nor.addWidget(self.spin_north)
+        nor.addStretch(1)
+        lay.addLayout(nor)
+
+        self.lbl_aim = QLabel("aim   az \u2014\u00b0   alt \u2014\u00b0")
+        self.lbl_aim.setStyleSheet("color: %s; font-family: Consolas;"
+                                   % theme.TEXT_MUT)
+        lay.addWidget(self.lbl_aim)
+
+        self.phone = PhoneLink(DEFAULT_PORT, box)
+        self.phone.orient.connect(self._on_phone_orient)
+        self.phone.loc.connect(self._on_phone_loc)
+        self.phone.status.connect(self._on_phone_status)
+        self.phone.error.connect(self._on_phone_error)
+        self.phone.start()
+        QApplication.instance().aboutToQuit.connect(self._phone_shutdown)
+        return box
+
+    def _phone_shutdown(self):
+        self.phone.close()
+
+    def _phone_restart(self):
+        self.phone.close()
+        self.phone = PhoneLink(self.spin_port.value(), self)
+        self.phone.orient.connect(self._on_phone_orient)
+        self.phone.loc.connect(self._on_phone_loc)
+        self.phone.status.connect(self._on_phone_status)
+        self.phone.error.connect(self._on_phone_error)
+        self.phone.start()
+        self.lbl_phone_server.setText(
+            "server  UDP 0.0.0.0:<b>%d</b>" % self.spin_port.value())
+        self.lbl_phone_status.setText(
+            "waiting for phone\u2026 run <b>python aim.py</b> inside Termux")
+        self.lbl_phone_status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+
+    def _on_phone_status(self, connected, peer):
+        if connected:
+            self.lbl_phone_status.setText("streaming from <b>%s</b>" % peer)
+            self.lbl_phone_status.setStyleSheet("color: %s;" % theme.OK)
+        else:
+            self.lbl_phone_status.setText(
+                "waiting for phone\u2026 run <b>python aim.py</b> in Termux")
+            self.lbl_phone_status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+
+    def _on_phone_error(self, text):
+        self.lbl_phone_status.setText(text)
+        self.lbl_phone_status.setStyleSheet("color: %s;" % theme.ERR)
+
+    def _on_phone_orient(self, _qx, _qy, _qz, _qw, az, alt):
+        if self.chk_drive.isChecked():
+            self.horizon_widget.set_aim((az + self.spin_north.value()) % 360.0,
+                                        alt)
+        self.lbl_aim.setText("aim   az %03.0f\u00b0   alt %02.0f\u00b0"
+                             % (az, alt))
+
+    def _on_phone_loc(self, lat, lon, _acc):
+        if not self.chk_gps.isChecked():
+            return
+        now = time.time()
+        prev = self._phone_loc
+        if prev is not None:
+            moved = (abs(lat - prev[0]) >= 0.00005
+                     or abs(lon - prev[1]) >= 0.00005)
+            if not moved and now - prev[2] < 5.0:
+                return
+        if self._phone_base_loc is None:
+            self._phone_base_loc = (self.ctrl.city, self.ctrl.lat,
+                                    self.ctrl.lon, self.ctrl.tz)
+        self._phone_loc = (lat, lon, now)
+        self.ctrl.set_location("Phone GPS", lat, lon, self.ctrl.tz)
+
+    def _on_phone_gps_toggled(self, checked):
+        if checked:
+            return
+        base = self._phone_base_loc
+        if base is None:
+            return
+        self._phone_base_loc = None
+        self._phone_loc = None
+        city, lat, lon, tz = base
+        self.ctrl.set_location(city, lat, lon, tz)
 
     def _on_view_changed(self, index):
         self.view_stack.setCurrentIndex(index)

@@ -173,6 +173,40 @@ warm glow resting on the horizon toward the Sun at twilight; compass directions 
 marked below the horizon. As with the 3D sky, every value comes from the same
 astronomy engine, so the map always agrees with the rest of the app.
 
+### Aim the sky map from your phone (Termux, no APK)
+
+On a phone and desktop on the **same Wi-Fi**, you can drive the live sky by
+physically pointing your phone at the sky — the phone streams its rotation-vector
+orientation + location to the desktop over **UDP 5555**:
+
+1. On the phone install **Termux** and **Termux:API**, both from **F-Droid**
+   (the Google Play builds cannot talk to the API app). See
+   [`phone-app/`](phone-app/README.md) for the full setup.
+2. Inside Termux: `bash termux/setup.sh` then `python termux/aim.py`.
+   It auto-finds the desktop (or prompts for the LAN IP shown in the desktop's
+   *Phone link* box).
+3. On the desktop the *Phone link* box shows **"streaming from \<phone IP\>"**
+   and — with **Drive sky map from phone** ticked — the horizon sky map centres on
+   the direction the phone's back (camera) is aimed: left/right rotation turns
+   the view, tilting up/down sweeps it vertically.
+
+`aim.py` sends a built-in **Ludhiana, India** location so the sky map is right
+without GPS; pass `--gps` for live GPS (with automatic network-location fallback),
+or override with `--lat 28.61 --lon 77.20 [--alt 216]`. A quick "figure-8" wave
+with the phone improves the compass calibration, and indoor magnetic fields are
+exactly what the **North offset** spinbox corrects for.
+
+**No phone handy?** Run the standalone desktop simulator
+**`python tools/phone_sim.py`** — a mouse-draggable cube streams the same
+orientation packets (and the Ludhiana location) to the desktop app, so you can
+test the phone-link pipeline, the sky-map aiming and the whole UI on one
+machine. It also switches the sky map to your aim exactly like a phone would.
+
+If the phone can't find the desktop: allow **inbound UDP 5555** for Python in
+Windows Defender Firewall (manageable only by an admin), keep both devices on the
+same Wi-Fi without **AP/client isolation**, and use `python aim.py
+192.168.x.y` with the desktop IP from the *Phone link* box as a direct fallback.
+
 ## Global visibility map (Sighting view, key G)
 
 Switch the Sighting map to **Global** to see, for the same evening, which
@@ -189,12 +223,15 @@ back and forth between dates is instant; your city is pinned on the map.
 
 ```
 main.py                 entry point
+tools/phone_sim.py      mouse-driven desktop phone simulator (no phone needed)
+phone-app/              Termux phone app - aim streamer (see its README)
 moonwatch/
   theme.py              palette, stylesheet, fonts
   controller.py         shared state + computation threads
   charts.py             vector canvas widgets (sky, altitude, scatter, box)
   sighting_sky_3d.py    interactive 3D Alt–Az sighting sky (PyVista)
   sky_map.py            2D pannable horizon sky map (Live view)
+  phone.py              UDP phone-link receiver (orientation + location)
   pages.py              the six workspace pages
   dialogs.py            date & location, Ramadan/Eid dates, About
   app_window.py         main window, menus, toolbar, shortcuts
