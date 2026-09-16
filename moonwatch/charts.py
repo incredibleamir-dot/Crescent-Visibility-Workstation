@@ -13,7 +13,7 @@ import numpy as np
 
 from PySide6.QtCore import Qt, QRect, QRectF, QPointF
 from PySide6.QtGui import (QPainter, QColor, QImage, QPixmap, QLinearGradient,
-                           QRadialGradient, QPen, QBrush, QFont,
+                           QRadialGradient, QPen, QBrush,
                            QFontMetrics, QPolygonF)
 from PySide6.QtWidgets import QWidget
 

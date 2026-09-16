@@ -34,6 +34,7 @@ import astronomy
 from . import globalmap as gm
 from . import theme
 from .charts import F, tw, crescent_pixmap, crescent_rot, _draw_text
+from .controller import fmt_age_h
 
 SKY_W, SKY_H = 860, 440
 GLOBAL_W, GLOBAL_H = 860, 480
@@ -250,22 +251,10 @@ def render_west_frame(frames, idx, lat, lon, tz, w=SKY_W, h=SKY_H):
     _draw_text(p, area.left() + 10, area.top() + 22,
                "Sunset %s  |  Moon %.1f\u00b0  |  Arc of light %.1f\u00b0  |  Age %s"
                % (f["sunset"].strftime("%H:%M"),
-                  f["m_alt"], f["arc"], _fmt_age(f["age"])),
+                  f["m_alt"], f["arc"], fmt_age_h(f["age"])),
                theme.TEXT_MUT, F(9, mono=True))
     p.end()
     return _to_pil(img)
-
-
-def _fmt_age(hours):
-    if hours is None:
-        return "-"
-    days = int(hours) // 24
-    hrs = int(hours) % 24
-    if days and hrs:
-        return "%dd %dh" % (days, hrs)
-    if days:
-        return "%dd" % days
-    return "%.1fh" % hours
 
 
 # ---------------------------------------------------------------------------

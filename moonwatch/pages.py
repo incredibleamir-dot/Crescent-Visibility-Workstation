@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                QTableWidgetItem, QHeaderView, QScrollArea,
                                QComboBox, QPushButton, QFrame, QSizePolicy,
                                QAbstractItemView, QStackedWidget,
-                               QCheckBox, QDoubleSpinBox, QSpinBox,
-                               QApplication)
+                               QCheckBox, QDoubleSpinBox,
+                               QLineEdit, QApplication)
 
 from . import theme
 import astronomy
@@ -25,7 +25,7 @@ from .charts import (SkyWidget, AltitudeChartWidget, ScatterWidget,
 from .sighting_sky_3d import SightingSky3D
 from .sky_map import HorizonSkyWidget
 from .controller import fmt_date, fmt_time, fmt_age_h, coord_str
-from .phone import PhoneLink, DEFAULT_PORT, lan_ip
+from .phone import PhoneLink
 
 
 def panel_frame(widget):
@@ -805,50 +805,45 @@ class LivePage(QWidget):
         self._phone_loc = None
 
         box = QGroupBox(
-            "Phone link - aim the sky map with your phone (Termux)")
+            "Phone link - aim the sky map with your phone (SensorCast)")
         lay = QVBoxLayout(box)
         lay.setSpacing(6)
 
         self.lbl_phone_status = QLabel(
-            "waiting for phone\u2026 run <b>python aim.py</b> inside Termux")
+            "not connected\u2014enter your SensorCast username and press "
+            "<b>Connect</b>")
         self.lbl_phone_status.setTextFormat(Qt.RichText)
         self.lbl_phone_status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
         self.lbl_phone_status.setWordWrap(True)
         lay.addWidget(self.lbl_phone_status)
 
-        here = lan_ip() or "offline"
-        self.lbl_phone_ip = QLabel(
-            "Desktop IP for the phone:\n"
-            "<span style='font-size:16pt; color:%s; font-family:Consolas;'>"
-            "%s</span>" % (theme.OK, here))
-        self.lbl_phone_ip.setTextFormat(Qt.RichText)
-        self.lbl_phone_ip.setStyleSheet("color: %s;" % theme.TEXT_DIM)
-        self.lbl_phone_ip.setWordWrap(True)
-        lay.addWidget(self.lbl_phone_ip)
-
-        self.lbl_phone_server = QLabel(
-            "server  UDP 0.0.0.0:<b>%d</b>\n"
-            "on the phone (Termux): <b>python aim.py</b>  - it auto-finds "
-            "this machine, or type the IP above if discovery misses."
-            % DEFAULT_PORT)
-        self.lbl_phone_server.setTextFormat(Qt.RichText)
-        self.lbl_phone_server.setStyleSheet("color: %s;" % theme.TEXT_MUT)
-        self.lbl_phone_server.setWordWrap(True)
-        lay.addWidget(self.lbl_phone_server)
-
         row = QHBoxLayout()
-        self.spin_port = QSpinBox()
-        self.spin_port.setRange(1025, 65535)
-        self.spin_port.setValue(DEFAULT_PORT)
-        self.spin_port.setToolTip("UDP port the phone streams to")
-        btn_restart = QPushButton("Restart server")
-        btn_restart.setToolTip("Rebind the listener, e.g. after changing the port")
-        btn_restart.clicked.connect(self._phone_restart)
-        row.addWidget(QLabel("Port"))
-        row.addWidget(self.spin_port)
-        row.addWidget(btn_restart)
-        row.addStretch(1)
+        self.edit_username = QLineEdit()
+        self.edit_username.setPlaceholderText(
+            "SensorCast username, e.g. incredibleamir_5338")
+        self.edit_username.setToolTip(
+            "Username shown in the SensorCast Android app; keep the app "
+            "streaming and the phone on the internet")
+        self.edit_username.returnPressed.connect(self._phone_toggle)
+        btn_connect = QPushButton("Connect")
+        btn_connect.setFixedWidth(90)
+        btn_connect.setToolTip("Connect to / disconnect from the SensorCast stream")
+        btn_connect.clicked.connect(self._phone_toggle)
+        self.btn_connect = btn_connect
+        row.addWidget(QLabel("Username"))
+        row.addWidget(self.edit_username, 1)
+        row.addWidget(self.btn_connect)
         lay.addLayout(row)
+
+        self.lbl_phone_hint = QLabel(
+            "Phone app: stream <b>Rotation Vector</b> at the fastest delay "
+            "for aiming; tick <b>GPS / Location</b> too if you want the live "
+            "observer location.  Frame format doesn't matter (all are auto-"
+            "detected).")
+        self.lbl_phone_hint.setTextFormat(Qt.RichText)
+        self.lbl_phone_hint.setStyleSheet("color: %s;" % theme.TEXT_MUT)
+        self.lbl_phone_hint.setWordWrap(True)
+        lay.addWidget(self.lbl_phone_hint)
 
         self.chk_drive = QCheckBox("Drive sky map from phone")
         self.chk_drive.setChecked(True)
@@ -884,31 +879,36 @@ class LivePage(QWidget):
                                    % theme.TEXT_MUT)
         lay.addWidget(self.lbl_aim)
 
-        self.phone = PhoneLink(DEFAULT_PORT, box)
+        self.phone = PhoneLink(box)
         self.phone.orient.connect(self._on_phone_orient)
         self.phone.loc.connect(self._on_phone_loc)
         self.phone.status.connect(self._on_phone_status)
         self.phone.error.connect(self._on_phone_error)
-        self.phone.start()
         QApplication.instance().aboutToQuit.connect(self._phone_shutdown)
         return box
 
     def _phone_shutdown(self):
-        self.phone.close()
+        self.phone.disconnect()
 
-    def _phone_restart(self):
-        self.phone.close()
-        self.phone = PhoneLink(self.spin_port.value(), self)
-        self.phone.orient.connect(self._on_phone_orient)
-        self.phone.loc.connect(self._on_phone_loc)
-        self.phone.status.connect(self._on_phone_status)
-        self.phone.error.connect(self._on_phone_error)
-        self.phone.start()
-        self.lbl_phone_server.setText(
-            "server  UDP 0.0.0.0:<b>%d</b>" % self.spin_port.value())
-        self.lbl_phone_status.setText(
-            "waiting for phone\u2026 run <b>python aim.py</b> inside Termux")
-        self.lbl_phone_status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+    def _phone_toggle(self):
+        if self.phone.is_connected():
+            self.phone.disconnect()
+            self._set_phone_ui(connected=False)
+        else:
+            username = self.edit_username.text().strip()
+            if not username:
+                self.lbl_phone_status.setText(
+                    "Enter your SensorCast username first")
+                self.lbl_phone_status.setStyleSheet("color: %s;" % theme.ERR)
+                return
+            self.lbl_phone_status.setText(
+                "connecting to <b>%s</b>\u2026" % username)
+            self.lbl_phone_status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+            self.phone.connect_stream(username)
+
+    def _set_phone_ui(self, connected):
+        self.btn_connect.setText("Disconnect" if connected else "Connect")
+        self.edit_username.setEnabled(not connected)
 
     def _on_phone_status(self, connected, peer):
         if connected:
@@ -916,14 +916,18 @@ class LivePage(QWidget):
             self.lbl_phone_status.setStyleSheet("color: %s;" % theme.OK)
         else:
             self.lbl_phone_status.setText(
-                "waiting for phone\u2026 run <b>python aim.py</b> in Termux")
+                "not connected\u2014enter your SensorCast username and press "
+                "<b>Connect</b>")
             self.lbl_phone_status.setStyleSheet("color: %s;" % theme.TEXT_DIM)
+        self._set_phone_ui(connected)
 
     def _on_phone_error(self, text):
         self.lbl_phone_status.setText(text)
         self.lbl_phone_status.setStyleSheet("color: %s;" % theme.ERR)
+        self._set_phone_ui(False)
 
     def _on_phone_orient(self, _qx, _qy, _qz, _qw, az, alt):
+        alt = max(0.0, min(90.0, alt))
         if self.chk_drive.isChecked():
             self.horizon_widget.set_aim((az + self.spin_north.value()) % 360.0,
                                         alt)

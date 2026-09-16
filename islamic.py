@@ -8,8 +8,6 @@ anchored to a well-known reference (1 Ramadan 1446 AH = 1 March 2025) and the
 lunations are then counted forward / backward from it.
 """
 
-import math
-import os
 from datetime import date, datetime, timedelta
 
 import astronomy

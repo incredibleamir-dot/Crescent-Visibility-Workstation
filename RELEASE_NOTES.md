@@ -1,11 +1,29 @@
 # Moon Watch - Crescent Visibility Workstation — Release Notes
 
-**Version 1.3.0** · PySide6 desktop app for predicting and analysing new-crescent
+**Version 1.5.0** · PySide6 desktop app for predicting and analysing new-crescent
 visibility (Ramadan / Eid) from any location.
 
 > Repository: [Crescent-Visibility-Workstation](https://github.com/incredibleamir-dot/Crescent-Visibility-Workstation)
 
 ---
+
+## What's new in v1.5.0
+
+- **Phone link over SensorCast WebSocket** (replaces the Termux/UDP link): the
+  desktop subscribes to a SensorCast stream
+  (`wss://api.sensorcast.app`, namespace `/stream/<username>`) for the phone's
+  rotation-vector orientation and optional GPS.  Enter the username in the LIVE
+  page's *Phone link* box and the horizon sky map follows the phone's aim.
+- **Altitude clamping on the horizon sky map**: the view pans from the horizon
+  up to the zenith (0–90°), pinned so the view bottom never drops below -5°.
+- **Shared SensorCast protocol module** (`moonwatch/sensorcast.py`): frame
+  parsing and the quaternion→aim maths now live in one place, reused by both the
+  desktop link and the `tools/sensorcast_capture.py` terminal tool.
+- **Pytest test suite** covering the protocol parser, quaternion aiming, the
+  altitude clamp and golden spot-checks of the astronomy / analysis / islamic /
+  verification engines (`pip install -r requirements-dev.txt && python -m pytest tests`).
+- **Cleanup**: removed the Termux `phone-app/` and stale debug dumps; removed
+  dead imports/constants across the astronomy / islamic / charts modules.
 
 ## What's new in v1.3.0
 

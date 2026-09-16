@@ -1,158 +1,210 @@
-"""Phone link: streams the Android phone's IMU + GPS into the app.
+"""Phone link: streams the Android phone's sensors into the app via SensorCast.
 
-The phone runs ``phone-app/termux/aim.py`` from Termux, which sends JSON packets
-over UDP to this desktop listener on the same Wi-Fi:
+The phone runs the SensorCast Android app (https://sensorcast.app) and
+broadcasts sensor frames (Rotation Vector + optional GPS).  This desktop class
+connects to the SensorCast WebSocket API as a subscriber and re-emits the
+frames as Qt signals that LivePage consumes to drive the horizon sky map and,
+optionally, the observer location.
 
-    {"type":"orient","t":123.4,"qx":..,"qy":..,"qz":..,"qw":..,
-     "az":..,"alt":..}                     aim of the back camera
-    {"type":"loc","t":123.4,"lat":..,"lon":..,"acc":..}   GPS fix
-    {"type":"ping","t":123.4}              keep-alive heartbeat
-    {"type":"disc"}                         broadcast: "are you the server?"
+    wss://api.sensorcast.app   /socket.io/   namespace /stream/<username>
 
-``PhoneLink`` runs one daemon socket thread, parses datagrams and re-emits
-Qt signals that LivePage consumes to drive the horizon sky map and, optionally,
-the observer location.  ``status`` tracks when packets stop arriving so the UI
-can show a live/disconnected indicator.
+After connecting, the subscriber must emit ``role`` == ``"subscriber"`` within
+5 seconds and keep sending a ``heartbeat`` event every ~20 s.
+
+Frame formats handled: JSON, CSV, COMPACT, TIMESTAMP (see sensorcast.app/docs).
+The parsing / quaternion helpers themselves live in ``moonwatch.sensorcast`` so
+the desktop link and the capture tool share one definition.
 """
 
-import json
-import socket
 import threading
 import time
 
 from PySide6.QtCore import QObject, Signal
 
-DEFAULT_PORT = 5555          # UDP port the phone streams to
-STALE_SECONDS = 3.0          # no packets for this long  -> "disconnected"
-
-
-def lan_ip():
-    """Best guess of this machine's primary LAN IPv4 address (or None)."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-        finally:
-            s.close()
-    except OSError:
-        return None
+from .sensorcast import SERVER, parse_frame, q_to_aim
 
 
 class PhoneLink(QObject):
-    """Receive UDP orientation / location packets and re-emit Qt signals.
+    """Subscribe to a SensorCast stream and re-emit Qt signals.
 
-    The listener thread emits signals directly (Qt queues them across the
-    threads automatically), and only updates internal state under no locks
-    that the GUI reads through those signals.
+    The socket client runs in a daemon thread; signals are queued to the GUI
+    thread automatically by Qt.
     """
 
     orient = Signal(float, float, float, float, float, float)
     #                                  qx    qy    qz    qw    az   alt
     loc = Signal(float, float, float)                     # lat lon acc-m
-    status = Signal(bool, str)                            # connected, peer ip
+    status = Signal(bool, str)                            # connected, username
     error = Signal(str)
 
-    def __init__(self, port=DEFAULT_PORT, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.port = int(port)
-        self._sock = None
         self._thread = None
+        self._sio = None
         self._stop = threading.Event()
-        self._last = 0.0
         self._connected = False
-        self._peer = ""
+        self._seen_plain_rv = False
+        self.username = ""
 
     # ------------------------------------------------------------- lifecycle
-    def start(self):
-        if self._thread is not None:
+    def is_connected(self):
+        return self._connected
+
+    def connect_stream(self, username):
+        self.disconnect()
+        username = (username or "").strip()
+        if not username:
+            self.error.emit("Enter a SensorCast username first")
             return
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            except OSError:
-                pass
-            sock.bind(("0.0.0.0", self.port))
-            sock.settimeout(0.5)
-        except OSError as exc:
-            self.error.emit("UDP port %d is unavailable: %s" % (self.port, exc))
-            return
-        self._sock = sock
+        self.username = username
         self._stop.clear()
-        self._thread = threading.Thread(target=self._recv_loop, daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(username,),
+                                        daemon=True)
         self._thread.start()
 
-    def close(self):
+    def disconnect(self):
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-            self._thread = None
-        if self._sock is not None:
+        sio = self._sio
+        self._sio = None
+        if sio is not None:
             try:
-                self._sock.close()
-            except OSError:
+                sio.disconnect()
+            except Exception:
                 pass
-            self._sock = None
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=2.0)
+        was = self._connected
+        self._connected = False
+        if was or self.username:
+            self.status.emit(False, self.username)
 
-    # ---------------------------------------------------------------- recv
-    def _recv_loop(self):
-        while not self._stop.is_set():
-            try:
-                data, addr = self._sock.recvfrom(65507)
-            except socket.timeout:
-                self._check_stale()
-                continue
-            except OSError:
-                break
-            self._handle(data, addr)
-            self._check_stale()
-
-    def _handle(self, data, addr):
+    # --------------------------------------------------------------- socket
+    def _run(self, username):
         try:
-            msg = json.loads(data.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
+            import socketio
+        except ImportError:
+            self.error.emit('Missing dependency: run  '
+                            'pip install "python-socketio[client]"')
+            self.status.emit(False, username)
             return
-        kind = msg.get("type")
-        if kind == "disc":
-            self._reply_discovery(addr)
-            self._note_seen(addr)
-        elif kind == "orient":
-            self._note_seen(addr)
-            self.orient.emit(
-                float(msg.get("qx", 0.0)), float(msg.get("qy", 0.0)),
-                float(msg.get("qz", 0.0)), float(msg.get("qw", 1.0)),
-                float(msg.get("az", 0.0)), float(msg.get("alt", 0.0)))
-        elif kind == "loc":
-            self._note_seen(addr)
-            self.loc.emit(float(msg.get("lat", 0.0)),
-                          float(msg.get("lon", 0.0)),
-                          float(msg.get("acc", -1.0)))
-        elif kind == "ping":
-            self._note_seen(addr)
+        try:
+            self._run_client(socketio, username)
+        except Exception as exc:
+            if not self._stop.is_set():
+                self.error.emit("SensorCast connection failed: %s" % exc)
+                self.status.emit(False, username)
+        finally:
+            self._sio = None
 
-    def _note_seen(self, addr):
-        self._last = time.time()
-        if not self._connected:
+    def _run_client(self, socketio, username):
+        ns = "/stream/%s" % username
+        sio = socketio.Client()
+        self._sio = sio
+
+        @sio.event(namespace=ns)
+        def connect():
+            sio.emit("role", "subscriber", namespace=ns)
+
+        @sio.on("connected", namespace=ns)
+        def on_connected(data):
             self._connected = True
-            self._peer = addr[0]
-            self.status.emit(True, self._peer)
+            self.status.emit(True, username)
 
-    def _check_stale(self):
-        if self._connected and time.time() - self._last > STALE_SECONDS:
-            self._connected = False
-            self.status.emit(False, self._peer)
-            return True
-        return False
+        @sio.on("frame", namespace=ns)
+        def on_frame(data):
+            self._handle_frame(data)
 
-    def _reply_discovery(self, addr):
-        ip = lan_ip()
-        if not ip:
-            return
+        @sio.on("publisher_disconnected", namespace=ns)
+        def on_pub_gone():
+            if not self._stop.is_set():
+                self.error.emit("Publisher disconnected - stream ended")
+                self.status.emit(False, username)
+
+        @sio.on("connect_error", namespace=ns)
+        def on_conn_error(e):
+            if not self._stop.is_set():
+                self.error.emit("Connection error: %s" % e)
+                self.status.emit(False, username)
+
+        @sio.on("auth_error", namespace=ns)
+        def on_auth_error(e):
+            if not self._stop.is_set():
+                self.error.emit("Auth error: %s" % e)
+                self.status.emit(False, username)
+
+        @sio.event(namespace=ns)
+        def disconnect():
+            if self._connected:
+                self._connected = False
+                self.status.emit(False, username)
+
+        def heartbeat():
+            while not self._stop.is_set():
+                time.sleep(20)
+                if sio.connected:
+                    try:
+                        sio.emit("heartbeat", namespace=ns)
+                    except Exception:
+                        pass
+
+        threading.Thread(target=heartbeat, daemon=True).start()
+
+        sio.connect(SERVER, namespaces=[ns], socketio_path="/socket.io/")
         try:
-            self._sock.sendto(json.dumps(
-                {"type": "disc_reply", "ip": ip, "name": "moonwatch"}
-            ).encode("utf-8"), (addr[0], addr[1]))
-        except OSError:
-            pass
+            while not self._stop.is_set() and sio.connected:
+                sio.sleep(0.3)
+        finally:
+            try:
+                sio.disconnect()
+            except Exception:
+                pass
+            self._connected = False
+
+    # --------------------------------------------------------------- frames
+    def _handle_frame(self, data):
+        parsed = parse_frame(data)
+        sensor = parsed.get("sensor") or ""
+        values = parsed.get("values") or {}
+        if not values:
+            return
+        s_low = str(sensor).lower()
+
+        # --- GPS fix -----------------------------------------------------
+        if "gps" in s_low:
+            try:
+                lat = float(values.get("latitude", values.get("lat")))
+                lon = float(values.get("longitude", values.get("lon")))
+                acc = float(values.get("accuracy", values.get("acc", -1.0)))
+            except (TypeError, ValueError):
+                return
+            self.loc.emit(lat, lon, acc)
+            return
+
+        # --- rotation vector quaternion (absolute heading) ---------------
+        if "rotation vector" in s_low:
+            try:
+                qx = float(values.get("x", 0.0))
+                qy = float(values.get("y", 0.0))
+                qz = float(values.get("z", 0.0))
+                qw = float(values.get("w", -1.0))
+            except (TypeError, ValueError):
+                return
+            if "game" not in s_low:
+                self._seen_plain_rv = True
+            elif self._seen_plain_rv:
+                return                      # prefer the compass RV sensor
+            az, alt = q_to_aim(qx, qy, qz, qw)
+            self.orient.emit(qx, qy, qz, qw, az, alt)
+            return
+
+        # --- euler / legacy orientation (fallback only) ------------------
+        if "orientation" in s_low and not self._seen_plain_rv:
+            try:
+                yaw = float(values.get("yaw", values.get("z",
+                          values.get("azimuth", values.get("x")))))
+                pitch = float(values.get("pitch", values.get("y")))
+            except (TypeError, ValueError):
+                return
+            self.orient.emit(0.0, 0.0, 0.0, 1.0,
+                             (float(yaw) + 180.0) % 360.0, -float(pitch))

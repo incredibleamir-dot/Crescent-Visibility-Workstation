@@ -31,12 +31,10 @@ References:
 import functools
 import math
 import os
-import sys
 import datetime as _dt
 from datetime import datetime, timedelta
 
 LIB_DIR = os.path.dirname(os.path.abspath(__file__))
-VENDOR = os.path.join(LIB_DIR, "vendor")
 
 from solarsystem import Moon, Geocentric  # noqa: E402
 from solarsystem.functions import normalize  # noqa: E402

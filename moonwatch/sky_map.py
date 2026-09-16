@@ -86,19 +86,30 @@ def _blend3(c_night, c_twi, c_day, wn, wt, wd):
             c_night[2] * wn + c_twi[2] * wt + c_day[2] * wd)
 
 
+BOTTOM_ALT = -5.0          # the view bottom never drops below -5°
+
+
+def clamp_alt_center(value, vspan, alt_max, bottom_alt=BOTTOM_ALT):
+    """Clamp the map's centre altitude so the visible band always lies within
+    ``[bottom_alt, alt_max]``: the view bottom never drops below
+    ``bottom_alt`` and the view top never rises above ``alt_max``."""
+    lo = vspan / 2.0 + bottom_alt
+    hi = alt_max - vspan / 2.0
+    return max(lo, min(hi, float(value)))
+
+
 class HorizonSkyWidget(QWidget):
     """Renders the sky map plus its pan / view controls."""
 
     SPAN = 130.0            # degrees of azimuth visible at once
     VSPAN = 32.0            # degrees of altitude visible at once
-    ALT_MIN = -4.0          # deepest altitude the bottom of the view can reach
     ALT_MAX = 90.0          # zenith; highest altitude the top of the view can reach
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.live = None
         self.az_center = 90.0
-        self.alt_center = self.ALT_MIN + self.VSPAN / 2.0
+        self.alt_center = clamp_alt_center(0.0, self.VSPAN, self.ALT_MAX)
         self._tex = None
 
         lay = QVBoxLayout(self)
@@ -169,9 +180,7 @@ class HorizonSkyWidget(QWidget):
         self.set_center(self.az_center + deg)
 
     def set_alt_center(self, alt):
-        lo = -(self.VSPAN / 2.0)          # horizon lies along the bottom edge
-        hi = self.ALT_MAX - self.VSPAN / 2.0
-        self.alt_center = max(lo, min(hi, alt))
+        self.alt_center = clamp_alt_center(alt, self.VSPAN, self.ALT_MAX)
         self.canvas.alt_center = self.alt_center
         self._update_label()
         self.canvas.update()

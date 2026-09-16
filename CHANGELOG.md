@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.5.0] - 2026-09-16
+
+### Changed
+- **Phone link now uses SensorCast WebSocket** instead of Termux/UDP: the
+  desktop subscribes to the SensorCast stream (`wss://api.sensorcast.app`,
+  namespace `/stream/<username>`, `role=subscriber` + heartbeat) for the phone's
+  rotation-vector orientation and optional GPS location.
+- **Sky-map altitude clamp**: the Live horizon map now pans from the horizon up
+  to the zenith (0-90°), pinned so the view bottom never drops below -5°; both
+  the phone-driven aim and drag panning route through the same clamp.
+
+### Added
+- `moonwatch/sensorcast.py`: the SensorCast wire parsing + quaternion-to-aim
+  maths, shared by the desktop phone link and `tools/sensorcast_capture.py` so
+  the frame format is defined exactly once.
+- Pytest test suite (`tests/`): frame parsing, quaternion aiming, the sky-map
+  altitude clamp, and golden spot-checks of the astronomy / analysis / islamic /
+  verification engines.  Install with `pip install -r requirements-dev.txt`
+  (adds `pytest`) and run `python -m pytest tests`.
+
+### Removed
+- `phone-app/` (Termux UDP aim streamer) - superseded by the SensorCast link.
+- Stale `sensorcast_capture_*.txt` debug dumps.  `tools/phone_sim.py` is kept
+  but re-labelled as a legacy UDP simulator (not wired to the current desktop
+  receiver).
+- Dead code: unused `sys` import and `VENDOR` constant in `astronomy.py`;
+  unused `math` / `os` imports in `islamic.py`; unused `QFont` import in
+  `moonwatch/charts.py`; the capture tool's duplicated `parse_frame` and
+  `animation.py`'s duplicated age formatter (both now use the shared one).
+
+
 ## [1.4.0] - 2026-09-14
 
 ### Added

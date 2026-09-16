@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Moon Watch - desktop phone simulator.
+"""Moon Watch - desktop phone simulator (legacy UDP).
 
 A standalone tool that pretends to be the phone: an on-screen cube you drag
 with the mouse rotates like a phone, and the resulting orientation + a fixed
-Ludhiana location are streamed over UDP to the desktop Moon Watch app with the
-same protocol as phone-app/termux/aim.py.
+Ludhiana location are streamed over UDP with the same protocol the original
+Termux link (``phone-app/termux/aim.py``) used.
+
+**Legacy note** - the desktop app now links to SensorCast over WebSocket;
+this simulator is retained for offline testing of the quaternion / aim math
+but is **not** connected to the current desktop listener.
 
     python tools/phone_sim.py                  # -> 192.168.200.198:5555
     python tools/phone_sim.py --host 10.0.0.8 --port 5555
