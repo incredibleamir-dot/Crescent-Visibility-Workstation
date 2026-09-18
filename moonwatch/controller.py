@@ -157,7 +157,10 @@ class TextureBank:
             return arr
         nh, nw = max(1, int(round(h * f))), max(1, int(round(w * f)))
         small = img.scaled(nw, nh, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        return TextureBank._as_array(small, nw, nh)
+        # KeepAspectRatio may return a smaller box than requested; use the
+        # actual pixmap size so the numpy reshape always matches.
+        sw, sh = max(1, small.width()), max(1, small.height())
+        return TextureBank._as_array(small, sw, sh)
 
     def get(self, name):
         return self._loaded.get(name)
@@ -480,34 +483,44 @@ class AppController(QObject):
     def _drain_global_map(self):
         if self._gm_q is None:
             return
-        try:
-            item = self._gm_q.get_nowait()
-        except queue.Empty:
-            return
-        except (OSError, ValueError, EOFError):
-            self.global_map_state = "idle"
-            self.globalMapChanged.emit()
-            return
-        kind, payload = item
-        if kind == "progress":
-            if self._gm_date == self.date.toordinal():
-                self.global_map_prog = float(payload)
-                self.globalMapChanged.emit()
-        elif kind == "done":
-            self._gm_q = None
-            if self._gm_date == self.date.toordinal():
-                self.global_map = payload
-                self.global_map_state = "done"
-            else:
+        # Drain every queued message so a burst of progress updates can not
+        # delay the terminal done/error behind them.
+        last_prog = None
+        while self._gm_q is not None:
+            try:
+                item = self._gm_q.get_nowait()
+            except queue.Empty:
+                break
+            except (OSError, ValueError, EOFError):
                 self.global_map_state = "idle"
-            self._gm_cache[payload.get("date").toordinal()] = payload
-            while len(self._gm_cache) > GM_CACHE_MAX:
-                self._gm_cache.pop(next(iter(self._gm_cache)))
-            self.globalMapChanged.emit()
-        elif kind == "error":
-            self._gm_q = None
-            self.global_map_error = str(payload)
-            self.global_map_state = "error"
+                self.globalMapChanged.emit()
+                return
+            kind, payload = item
+            if kind == "progress":
+                if self._gm_date == self.date.toordinal():
+                    last_prog = float(payload)
+            elif kind == "done":
+                self._gm_q = None
+                if self._gm_date == self.date.toordinal():
+                    self.global_map = payload
+                    self.global_map_state = "done"
+                else:
+                    self.global_map_state = "idle"
+                try:
+                    date_key = payload.get("date").toordinal()
+                except AttributeError:
+                    date_key = self._gm_date
+                self._gm_cache[date_key] = payload
+                while len(self._gm_cache) > GM_CACHE_MAX:
+                    self._gm_cache.pop(next(iter(self._gm_cache)))
+                self.globalMapChanged.emit()
+            elif kind == "error":
+                self._gm_q = None
+                self.global_map_error = str(payload)
+                self.global_map_state = "error"
+                self.globalMapChanged.emit()
+        if last_prog is not None and self._gm_q is not None:
+            self.global_map_prog = last_prog
             self.globalMapChanged.emit()
 
     # -------------------------------------------------------------- animation
@@ -540,25 +553,37 @@ class AppController(QObject):
     def _drain_animation(self):
         if self._anim_q is None:
             return
-        try:
-            item = self._anim_q.get_nowait()
-        except queue.Empty:
-            return
-        except (OSError, ValueError, EOFError):
-            self.animation.update(state="error",
-                                  error="animation worker unavailable")
+        last_prog = None
+        changed = False
+        while self._anim_q is not None:
+            try:
+                item = self._anim_q.get_nowait()
+            except queue.Empty:
+                break
+            except (OSError, ValueError, EOFError):
+                self.animation.update(state="error",
+                                      error="animation worker unavailable")
+                self.animationChanged.emit()
+                return
+            kind, payload = item
+            if kind == "progress":
+                last_prog = float(payload)
+                changed = True
+            elif kind == "done":
+                self._anim_q = None
+                self.animation.update(state="done", prog=1.0,
+                                      paths=list(payload))
+                self.animationChanged.emit()
+                return
+            elif kind == "error":
+                self._anim_q = None
+                self.animation.update(state="error", error=str(payload))
+                self.animationChanged.emit()
+                return
+        if changed:
+            if last_prog is not None:
+                self.animation["prog"] = last_prog
             self.animationChanged.emit()
-            return
-        kind, payload = item
-        if kind == "progress":
-            self.animation["prog"] = float(payload)
-        elif kind == "done":
-            self._anim_q = None
-            self.animation.update(state="done", prog=1.0, paths=list(payload))
-        elif kind == "error":
-            self._anim_q = None
-            self.animation.update(state="error", error=str(payload))
-        self.animationChanged.emit()
 
     def shutdown(self):
         """Stop background work (call on application close)."""

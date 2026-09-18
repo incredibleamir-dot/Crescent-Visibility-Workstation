@@ -30,12 +30,16 @@ GPS_TIMEOUT = 60              # how long to wait for one GPS fix
 DEFAULT_LOCATION = (30.900965, 75.857275, 262.0)   # Ludhiana, Punjab, India
 
 
-def q_to_aim(qx, qy, qz, qw=-1.0):
-    """(az, alt) the phone's back camera points at, from the Android
-    rotation-vector quaternion (device -> world in east-north-up)."""
+def q_to_aim(qx, qy, qz, qw=-1.0, axis="back"):
+    """(az, alt) the phone points at, from the Android rotation-vector
+    quaternion (device -> world in east-north-up).  axis "back" (0,0,-1,
+    default) or "top" (0,1,0, laser-pointer pose)."""
     if qw in (None, -1.0):
         qw = math.sqrt(max(0.0, 1.0 - (qx * qx + qy * qy + qz * qz)))
-    vx, vy, vz = 0.0, 0.0, -1.0                    # device -Z (back camera)
+    if str(axis or "").lower() == "top":
+        vx, vy, vz = 0.0, 1.0, 0.0                # device +Y (top edge)
+    else:
+        vx, vy, vz = 0.0, 0.0, -1.0              # device -Z (back camera)
     tx = 2.0 * (qy * vz - qz * vy)
     ty = 2.0 * (qz * vx - qx * vz)
     tz = 2.0 * (qx * vy - qy * vx)

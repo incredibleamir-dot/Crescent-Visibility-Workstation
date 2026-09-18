@@ -33,8 +33,8 @@ def test_compact_with_timestamp():
     assert len(p["values"]) == 4
 
 
-def test_compact_with_timestamp():
-    s = "98765;rotation vector;x,y,z,w:0.1,0.2,0.3,0.4"
+def test_csv_format():
+    s = "98765,rotation vector,x,y,z,w,0.1,0.2,0.3,0.4"
     p = parse_frame(s)
     assert p["timestamp"] == 98765
     assert p["sensor"] == "rotation vector"

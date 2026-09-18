@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Top-edge phone pointing** (default): `Point with` switches between top
+  edge (+Y, laser-pointer pose) and back camera (−Z, photograph pose);
+  `q_to_aim(..., axis=)` in `moonwatch/sensorcast.py` (plus `vec_to_aim`,
+  `accel_mag_to_aim`, `mag_strength` helpers).  Standing on your origin and
+  turning now pans the horizon map; calibration offsets are per-axis and
+  persisted.
+- **Magnetic-field + accelerometer support**: the desktop consumes mag/accel
+  frames (live `mag uT` health readout, ~25–65 µT clean), with a smoothed
+  tilt-compensated accel+mag compass fallback when no rotation vector is
+  seen.  Stream Rotation Vector + Magnetic Field (+ Accelerometer) in
+  SensorCast.
+- **Pointing calibration dialog**: point the top at the Moon/Sun, drag it to
+  the middle (or *Center map on target*), then *Calibrate to Moon/Sun* or
+  *Calibrate to view centre*; offsets persist via `QSettings`.
+
+### Documentation
+- In-app User Guide Live section rewritten (3D sky + horizon map + phone aim
+  + calibration); README phone section, `phone-app/README.md`, and
+  `phone.py`/`sky_map.py` docstrings updated to top-edge + mag workflow.
+
 ## [1.5.0] - 2026-09-16
 
 ### Changed

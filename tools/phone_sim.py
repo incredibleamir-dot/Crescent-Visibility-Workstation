@@ -64,13 +64,16 @@ def rotate(q, v):
     return r[1], r[2], r[3]
 
 
-def q_to_aim(q):
-    """(az, alt) degrees that the phone's back camera (-z) points at."""
+def q_to_aim(q, axis="back"):
+    """(az, alt) degrees that the phone points at ("back" -Z or "top" +Y)."""
     _, qx, qy, qz = q
     qw = q[0]
     if qw in (None, -1.0):
         qw = math.sqrt(max(0.0, 1.0 - (qx * qx + qy * qy + qz * qz)))
-    vx, vy, vz = 0.0, 0.0, -1.0
+    if str(axis or "").lower() == "top":
+        vx, vy, vz = 0.0, 1.0, 0.0
+    else:
+        vx, vy, vz = 0.0, 0.0, -1.0
     tx = 2.0 * (qy * vz - qz * vy)
     ty = 2.0 * (qz * vx - qx * vz)
     tz = 2.0 * (qx * vy - qy * vx)

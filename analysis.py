@@ -80,7 +80,8 @@ def equation_analysis(a="LT", b="ArcL",
     df = df[(df[a] <= limita) & (df[b] <= limitb)]
 
     xs = df[a].to_numpy(dtype=float)
-    df["test"] = eval(equation, {"x": xs, "np": np, "math": math})
+    df["test"] = eval(equation, {"__builtins__": {}, "x": xs, "np": np,
+                                 "math": math})
 
     def rates(sub):
         sub = sub.copy()
@@ -92,10 +93,18 @@ def equation_analysis(a="LT", b="ArcL",
         neg = abs(len(inv) - len(inv_ok)) / len(inv) * 100 if len(inv) else 0.0
         return pos, neg
 
-    curve = []
-    for v in np.linspace(0.0, limita, 160):
-        y = eval(equation, {"x": np.array([v]), "np": np, "math": math})[0]
-        curve.append((float(v), float(y)))
+    curve_xs = np.linspace(0.0, limita, 160)
+    curve_ys = eval(equation, {"__builtins__": {}, "x": curve_xs, "np": np,
+                               "math": math})
+    curve_ys = np.asarray(curve_ys, dtype=float)
+    if curve_ys.ndim == 0:
+        curve_ys = np.full_like(curve_xs, float(curve_ys))
+    else:
+        curve_ys = np.atleast_1d(curve_ys)
+        if curve_ys.shape[0] != curve_xs.shape[0]:
+            # Fall back to scalar broadcast for constant equations.
+            curve_ys = np.full_like(curve_xs, float(np.ravel(curve_ys)[0]))
+    curve = [(float(v), float(y)) for v, y in zip(curve_xs, curve_ys)]
 
     return {
         "kind": "equa",

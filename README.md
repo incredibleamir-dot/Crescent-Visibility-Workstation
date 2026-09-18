@@ -180,21 +180,26 @@ streams its rotation-vector orientation (and optionally its GPS location) over
 the **SensorCast** WebSocket service, which the desktop subscribes to:
 
 1. On the phone install the **SensorCast** app (https://sensorcast.app), create
-   an account and start broadcasting a **Rotation Vector** sensor stream (add a
+   an account and start broadcasting **Rotation Vector** + **Magnetic Field**
+   (+ Accelerometer as backup) at the fastest delay (add a
    GPS + Network Location stream if you also want live location). Note your
    username.
 2. On the desktop **LIVE** page, type the username into the *Phone link* box and
    press **Connect**. The box flips to **"streaming from \<username\>"** the
    moment the subscription is accepted.
-3. With **Drive sky map from phone** ticked, the horizon sky map centres on the
-   direction the phone's back (camera) is aimed: left/right rotation turns the
-   view, tilting up/down sweeps it vertically (the view is clamped to 0–90° of
-   altitude, horizon line pinned just below at -5°).
+3. With **Drive sky map from phone** ticked, stand on your spot and point the
+   **top edge of the phone** at the sky (laser-pointer pose; switch to *Back
+   camera* in *Point with* if you prefer the photograph pose): turning your
+   body pans left/right, tilting the top up/down sweeps vertically (the view
+   is clamped to 0–90° of altitude, horizon line pinned just below at -5°).
+   If the view lags your hand, point the top at the Moon/Sun, drag that body
+   to the middle and press **Calibrate...**.
 
 A **GPS** frame from the phone also updates the live location (tick **Use phone
 GPS location** to apply it). A quick "figure-8" wave with the phone improves the
-compass calibration, and indoor magnetic fields are exactly what the
-**North offset** spinbox corrects for.
+compass calibration; the live **mag uT** readout shows field health (~25–65 uT
+is clean Earth field, far outside means indoor interference). Residual twist is
+what **North offset** + **Calibrate...** correct for.
 
 The two connections use the same wire format — Socket.IO namespace
 `/stream/<username>`, `role=subscriber` + heartbeat — whose parsing/aim math

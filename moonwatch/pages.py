@@ -7,14 +7,14 @@ desktop splitter - chart on the left, parameter/result panels on the right.
 
 import time
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSettings
 from PySide6.QtGui import QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                QGroupBox, QLabel, QTableWidget, QSlider,
                                QTableWidgetItem, QHeaderView, QScrollArea,
                                QComboBox, QPushButton, QFrame, QSizePolicy,
                                QAbstractItemView, QStackedWidget,
-                               QCheckBox, QDoubleSpinBox,
+                               QCheckBox, QDoubleSpinBox, QDialog,
                                QLineEdit, QApplication)
 
 from . import theme
@@ -26,6 +26,8 @@ from .sighting_sky_3d import SightingSky3D
 from .sky_map import HorizonSkyWidget
 from .controller import fmt_date, fmt_time, fmt_age_h, coord_str
 from .phone import PhoneLink
+from .sensorcast import (apply_calibration, calibration_from_aim,
+                         wrap_az_delta)
 
 
 def panel_frame(widget):
@@ -677,6 +679,204 @@ class VerifyPage(QWidget):
 
 
 # --------------------------------------------------------------------------- live
+class PhoneCalDialog(QDialog):
+    """Calibrate phone pointing against the Moon or Sun.
+
+    Workflow (matches Settings -> Phone link -> Calibrate):
+    1. Physically point the phone's selected edge at the Moon (or Sun).
+    2. Drag the horizon sky map so that body sits in the middle of the
+       screen (or press "Center map on target").
+    3. Press "Calibrate".  The azimuth/altitude offset between the raw
+       phone aim and the reference is stored and applied to every future
+       phone frame until Reset.
+    """
+
+    def __init__(self, page, parent=None):
+        super().__init__(parent)
+        self.page = page
+        self.setWindowTitle("Calibrate phone pointing")
+        self.setModal(True)
+        self.setMinimumWidth(460)
+
+        try:
+            axis_txt = ("top edge" if self.page.cmb_axis.currentData()
+                        == "top" else "back camera")
+        except Exception:
+            axis_txt = "top edge"
+        info = QLabel(
+            "Point the phone's <b>%s</b> directly at the "
+            "<b>Moon</b> (or Sun), then drag the sky map so that body is "
+            "in the <b>middle of the screen</b> and press "
+            "<b>Calibrate</b>. The offset is saved and applied to all "
+            "future phone aims.<br><br>"
+            "Stand on your spot and turn your body to pan: "
+            "rotation-vector (+ magnetic field) aims from your origin, "
+            "no walking needed.<br><br>"
+            "<b>Sun safety:</b> never look directly at the Sun; aim "
+            "roughly using the phone's shadow instead." % axis_txt)
+        info.setTextFormat(Qt.RichText)
+        info.setWordWrap(True)
+        info.setStyleSheet("color: %s;" % theme.TEXT_MUT)
+
+        target_row = QHBoxLayout()
+        target_row.addWidget(QLabel("Reference body"))
+        self.cmb_target = QComboBox()
+        self.cmb_target.addItems(["Moon", "Sun"])
+        self.cmb_target.currentIndexChanged.connect(self._refresh)
+        target_row.addWidget(self.cmb_target, 1)
+
+        self.lbl_true = QLabel("--")
+        self.lbl_raw = QLabel("--")
+        self.lbl_view = QLabel("--")
+        self.lbl_off = QLabel("--")
+        for lab in (self.lbl_true, self.lbl_raw, self.lbl_view,
+                    self.lbl_off):
+            lab.setStyleSheet("font-family: Consolas; color: %s;"
+                              % theme.TEXT)
+            lab.setWordWrap(True)
+
+        form = QVBoxLayout()
+        form.addWidget(QLabel("True position (app ephemeris)"))
+        form.addWidget(self.lbl_true)
+        form.addWidget(QLabel("Phone aim (raw, before calibration)"))
+        form.addWidget(self.lbl_raw)
+        form.addWidget(QLabel("Sky-map centre (drag the body here)"))
+        form.addWidget(self.lbl_view)
+        form.addWidget(QLabel("Offset that Calibrate would store"))
+        form.addWidget(self.lbl_off)
+
+        btn_center = QPushButton("Center map on target")
+        btn_center.setToolTip("Pan the horizon sky map to the true "
+                              "Moon/Sun position")
+        btn_center.clicked.connect(self._center_on_target)
+        self.btn_center = btn_center
+
+        btn_cal_target = QPushButton("Calibrate to Moon/Sun")
+        btn_cal_target.setProperty("primary", True)
+        btn_cal_target.setToolTip("Store the offset phone-raw -> true body")
+        btn_cal_target.clicked.connect(self._cal_to_target)
+        self.btn_cal_target = btn_cal_target
+
+        btn_cal_view = QPushButton("Calibrate to view centre")
+        btn_cal_view.setToolTip("Store the offset phone-raw -> current "
+                                "map centre (use after dragging the body "
+                                "to the middle)")
+        btn_cal_view.clicked.connect(self._cal_to_view)
+        self.btn_cal_view = btn_cal_view
+
+        btn_reset = QPushButton("Reset")
+        btn_reset.setToolTip("Clear the stored azimuth/altitude offset")
+        btn_reset.clicked.connect(self._reset)
+
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(btn_center, 1)
+        row1.addWidget(btn_reset)
+        row1.addWidget(btn_close)
+        row2 = QHBoxLayout()
+        row2.addWidget(btn_cal_target, 1)
+        row2.addWidget(btn_cal_view, 1)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(info)
+        lay.addLayout(target_row)
+        lay.addLayout(form)
+        lay.addLayout(row1)
+        lay.addLayout(row2)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(500)
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start()
+        self._refresh()
+
+    def _target_name(self):
+        return self.cmb_target.currentText()
+
+    def _true_pos(self):
+        live = self.page.ctrl.live
+        if not live:
+            return None
+        try:
+            if self._target_name() == "Sun":
+                return float(live["s_az"]), float(live["s_alt"])
+            return float(live["m_az"]), float(live["m_alt"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _refresh(self):
+        true = self._true_pos()
+        raw = self.page.last_raw_aim()
+        view = (self.page.horizon_widget.az_center,
+                self.page.horizon_widget.alt_center)
+        north = self.page.spin_north.value()
+
+        if true is None:
+            self.lbl_true.setText("waiting for live data...")
+        else:
+            self.lbl_true.setText("az %06.1f°   alt %+06.1f°"
+                                  % (true[0], true[1]))
+        if raw[0] is None:
+            self.lbl_raw.setText("waiting for phone aim... "
+                                 "(connect + stream Rotation Vector)")
+        else:
+            self.lbl_raw.setText("az %06.1f°   alt %+06.1f°   "
+                                 "(north %+05.1f°)" % (raw[0], raw[1], north))
+        self.lbl_view.setText("az %06.1f°   alt %+06.1f°" % (view[0], view[1]))
+
+        can = raw[0] is not None and true is not None
+        if can:
+            off = calibration_from_aim(raw[0], raw[1], true[0], true[1],
+                                       north)
+            self.lbl_off.setText("az %+07.1f°   alt %+06.1f°" % off)
+        else:
+            self.lbl_off.setText("--")
+        self.btn_cal_target.setEnabled(bool(can))
+        self.btn_cal_view.setEnabled(raw[0] is not None)
+        self.btn_center.setEnabled(true is not None)
+        self.btn_cal_target.setText("Calibrate to %s" % self._target_name())
+
+    def _center_on_target(self):
+        true = self._true_pos()
+        if true is None:
+            return
+        self.page.horizon_widget.set_aim(true[0], true[1])
+        # show the horizon map so the user sees the body centred
+        try:
+            self.page.cmb_view.setCurrentIndex(1)
+        except Exception:
+            pass
+        self._refresh()
+
+    def _cal_to_target(self):
+        true = self._true_pos()
+        raw = self.page.last_raw_aim()
+        if true is None or raw[0] is None:
+            return
+        off = calibration_from_aim(raw[0], raw[1], true[0], true[1],
+                                   self.page.spin_north.value())
+        self.page.set_calibration(off[0], off[1])
+        self.page.horizon_widget.set_aim(true[0], true[1])
+        self._refresh()
+
+    def _cal_to_view(self):
+        raw = self.page.last_raw_aim()
+        if raw[0] is None:
+            return
+        view = (self.page.horizon_widget.az_center,
+                self.page.horizon_widget.alt_center)
+        off = calibration_from_aim(raw[0], raw[1], view[0], view[1],
+                                   self.page.spin_north.value())
+        self.page.set_calibration(off[0], off[1])
+        self._refresh()
+
+    def _reset(self):
+        self.page.set_calibration(0.0, 0.0)
+        self._refresh()
+
+
 class LivePage(QWidget):
     def __init__(self, ctrl, parent=None):
         super().__init__(parent)
@@ -803,6 +1003,17 @@ class LivePage(QWidget):
     def _build_phone_box(self):
         self._phone_base_loc = None
         self._phone_loc = None
+        self._settings = QSettings("MoonWatch", "PhonePointing")
+        try:
+            self._cal_az = float(self._settings.value("cal_az", 0.0))
+            self._cal_alt = float(self._settings.value("cal_alt", 0.0))
+        except (TypeError, ValueError):
+            self._cal_az, self._cal_alt = 0.0, 0.0
+        self._cal_az = wrap_az_delta(self._cal_az)
+        self._cal_alt = max(-30.0, min(30.0, self._cal_alt))
+        self._raw_aim = (None, None)
+        self._last_phone_ts = 0.0
+        self._last_phone_corr = (None, None)
 
         box = QGroupBox(
             "Phone link - aim the sky map with your phone (SensorCast)")
@@ -836,20 +1047,36 @@ class LivePage(QWidget):
         lay.addLayout(row)
 
         self.lbl_phone_hint = QLabel(
-            "Phone app: stream <b>Rotation Vector</b> at the fastest delay "
-            "for aiming; tick <b>GPS / Location</b> too if you want the live "
-            "observer location.  Frame format doesn't matter (all are auto-"
-            "detected).")
+            "Phone app: stream <b>Rotation Vector</b> + <b>Magnetic Field</b> "
+            "(+ Accelerometer as backup) at the fastest delay; tick "
+            "<b>GPS / Location</b> too if you want the live observer "
+            "location. Stand on your spot, <b>top edge of the phone</b> "
+            "toward the sky: turning your body pans left/right, tilting "
+            "the top up/down pans vertically. If the view lags your hand, "
+            "point the top at the Moon/Sun, drag it to the middle and press "
+            "<b>Calibrate...</b>.")
         self.lbl_phone_hint.setTextFormat(Qt.RichText)
         self.lbl_phone_hint.setStyleSheet("color: %s;" % theme.TEXT_MUT)
         self.lbl_phone_hint.setWordWrap(True)
         lay.addWidget(self.lbl_phone_hint)
 
+        axis_row = QHBoxLayout()
+        axis_row.addWidget(QLabel("Point with"))
+        self.cmb_axis = QComboBox()
+        self.cmb_axis.addItem("Top edge of phone", "top")
+        self.cmb_axis.addItem("Back camera", "back")
+        self.cmb_axis.setToolTip(
+            "Which phone direction aims the sky map: top edge (+Y, hold "
+            "like a laser pointer) or back camera (-Z, photograph pose)")
+        self.cmb_axis.currentIndexChanged.connect(self._on_axis_changed)
+        axis_row.addWidget(self.cmb_axis, 1)
+        lay.addLayout(axis_row)
+
         self.chk_drive = QCheckBox("Drive sky map from phone")
         self.chk_drive.setChecked(True)
         self.chk_drive.setToolTip(
-            "Point the horizon sky map along the direction the phone's back "
-            "camera is aimed in real space")
+            "Point the horizon sky map along the phone's selected "
+            "direction in real space")
         lay.addWidget(self.chk_drive)
 
         self.chk_gps = QCheckBox("Use phone GPS location")
@@ -869,21 +1096,69 @@ class LivePage(QWidget):
             "Added to the phone azimuth so magnetically-north readings line "
             "up with true north on the map (local magnetic declination, "
             "positive east)")
+        try:
+            saved_north = float(self._settings.value("north_offset", 0.0))
+        except (TypeError, ValueError):
+            saved_north = 0.0
+        self.spin_north.setValue(max(-180.0, min(180.0, saved_north)))
+        self.spin_north.valueChanged.connect(self._on_north_changed)
         nor.addWidget(QLabel("North offset"))
         nor.addWidget(self.spin_north)
         nor.addStretch(1)
         lay.addLayout(nor)
+
+        cal_row = QHBoxLayout()
+        self.lbl_cal = QLabel()
+        self.lbl_cal.setStyleSheet("color: %s; font-family: Consolas;"
+                                   % theme.TEXT_MUT)
+        cal_row.addWidget(QLabel("Pointing cal"))
+        cal_row.addWidget(self.lbl_cal, 1)
+        self.btn_cal = QPushButton("Calibrate...")
+        self.btn_cal.setToolTip(
+            "Point the top edge of the phone at the Moon/Sun, drag that "
+            "body to the middle of the sky map, then press Calibrate")
+        self.btn_cal.clicked.connect(self._open_calibrate)
+        cal_row.addWidget(self.btn_cal)
+        self.btn_cal_reset = QPushButton("Reset")
+        self.btn_cal_reset.setFixedWidth(60)
+        self.btn_cal_reset.setToolTip("Clear the stored pointing offset")
+        self.btn_cal_reset.clicked.connect(lambda: self.set_calibration(
+            0.0, 0.0))
+        cal_row.addWidget(self.btn_cal_reset)
+        lay.addLayout(cal_row)
+        self._update_cal_label()
 
         self.lbl_aim = QLabel("aim   az \u2014\u00b0   alt \u2014\u00b0")
         self.lbl_aim.setStyleSheet("color: %s; font-family: Consolas;"
                                    % theme.TEXT_MUT)
         lay.addWidget(self.lbl_aim)
 
+        self.lbl_mag = QLabel("mag  -- uT")
+        self.lbl_mag.setStyleSheet("color: %s; font-family: Consolas;"
+                                   % theme.TEXT_MUT)
+        self.lbl_mag.setToolTip("Live magnetic-field strength from the "
+                                "phone. Earth field is ~25-65 uT; far "
+                                "outside means indoor interference and the "
+                                "compass (rotation vector) cannot be trusted")
+        lay.addWidget(self.lbl_mag)
+        self._last_mag_ts = 0.0
+
         self.phone = PhoneLink(box)
         self.phone.orient.connect(self._on_phone_orient)
         self.phone.loc.connect(self._on_phone_loc)
+        self.phone.mag.connect(self._on_phone_mag)
         self.phone.status.connect(self._on_phone_status)
         self.phone.error.connect(self._on_phone_error)
+        # restore the saved pointer axis (default: top edge)
+        try:
+            saved_axis = str(self._settings.value("aim_axis",
+                                                  "top") or "top").lower()
+        except Exception:
+            saved_axis = "top"
+        if saved_axis not in ("top", "back"):
+            saved_axis = "top"
+        self.cmb_axis.setCurrentIndex(0 if saved_axis == "top" else 1)
+        self.phone.set_aim_axis(saved_axis)
         QApplication.instance().aboutToQuit.connect(self._phone_shutdown)
         return box
 
@@ -926,23 +1201,129 @@ class LivePage(QWidget):
         self.lbl_phone_status.setStyleSheet("color: %s;" % theme.ERR)
         self._set_phone_ui(False)
 
+    def _on_north_changed(self, value):
+        try:
+            self._settings.setValue("north_offset", float(value))
+        except Exception:
+            pass
+
+    def _on_axis_changed(self, index):
+        axis = self.cmb_axis.itemData(index) or "top"
+        axis = str(axis).lower()
+        if axis not in ("top", "back"):
+            axis = "top"
+        try:
+            self._settings.setValue("aim_axis", axis)
+        except Exception:
+            pass
+        try:
+            self.phone.set_aim_axis(axis)
+        except Exception:
+            pass
+        # Offsets are axis-specific; do not silently reuse a back-camera
+        # calibration for the top edge (or vice versa).
+        self.set_calibration(0.0, 0.0)
+        self._raw_aim = (None, None)
+        self._last_phone_corr = (None, None)
+        self.chk_drive.setToolTip(
+            "Point the horizon sky map along the phone's %s in real space"
+            % ("top edge" if axis == "top" else "back camera"))
+
+    def _on_phone_mag(self, _mx, _my, _mz, strength):
+        now = time.monotonic()
+        if now - self._last_mag_ts < 1.0:
+            return
+        self._last_mag_ts = now
+        try:
+            s = float(strength)
+        except (TypeError, ValueError):
+            return
+        if 25.0 <= s <= 65.0:
+            tag, col = "OK", theme.OK
+        elif s <= 0.0:
+            tag, col = "no mag yet", theme.TEXT_DIM
+        else:
+            tag, col = "interference?", theme.WARN
+        self.lbl_mag.setText("mag  %05.1f uT  %s" % (s, tag))
+        self.lbl_mag.setStyleSheet("color: %s; font-family: Consolas;" % col)
+
+    def last_raw_aim(self):
+        """Last raw (uncalibrated) phone aim, or (None, None)."""
+        return self._raw_aim
+
+    def set_calibration(self, az_off, alt_off):
+        try:
+            az_off = wrap_az_delta(float(az_off))
+            alt_off = max(-30.0, min(30.0, float(alt_off)))
+        except (TypeError, ValueError):
+            return
+        self._cal_az, self._cal_alt = az_off, alt_off
+        try:
+            self._settings.setValue("cal_az", az_off)
+            self._settings.setValue("cal_alt", alt_off)
+        except Exception:
+            pass
+        self._update_cal_label()
+        # Re-apply to the last aim immediately so the map jumps to the
+        # calibrated direction without waiting for the next sensor frame.
+        if self._raw_aim[0] is not None and self.chk_drive.isChecked():
+            corr_az, corr_alt = apply_calibration(
+                self._raw_aim[0], self._raw_aim[1],
+                self.spin_north.value(), self._cal_az, self._cal_alt)
+            corr_alt = max(0.0, min(90.0, corr_alt))
+            self.horizon_widget.set_aim(corr_az, corr_alt)
+
+    def _update_cal_label(self):
+        self.lbl_cal.setText("az %+05.1f°  alt %+05.1f°"
+                             % (self._cal_az, self._cal_alt))
+
+    def _open_calibrate(self):
+        dlg = PhoneCalDialog(self, self)
+        dlg.exec()
+
     def _on_phone_orient(self, _qx, _qy, _qz, _qw, az, alt):
-        alt = max(0.0, min(90.0, alt))
+        try:
+            az = float(az) % 360.0
+            alt = float(alt)
+        except (TypeError, ValueError):
+            return
+        self._raw_aim = (az, alt)
+        corr_az, corr_alt = apply_calibration(
+            az, alt, self.spin_north.value(), self._cal_az, self._cal_alt)
+        corr_alt = max(0.0, min(90.0, corr_alt))
+        # Throttle high-rate sensor streams: repaint at most ~25 Hz and
+        # skip imperceptible (<0.2 deg, <40 ms) jitter.
+        now = time.monotonic()
+        last = self._last_phone_corr
+        if last[0] is not None and now - self._last_phone_ts < 0.04:
+            d_az = abs(wrap_az_delta(corr_az - last[0]))
+            if d_az < 0.2 and abs(corr_alt - last[1]) < 0.2:
+                return
+        self._last_phone_ts = now
+        self._last_phone_corr = (corr_az, corr_alt)
         if self.chk_drive.isChecked():
-            self.horizon_widget.set_aim((az + self.spin_north.value()) % 360.0,
-                                        alt)
-        self.lbl_aim.setText("aim   az %03.0f\u00b0   alt %02.0f\u00b0"
-                             % (az, alt))
+            self.horizon_widget.set_aim(corr_az, corr_alt)
+        self.lbl_aim.setText("aim   az %03.0f°   alt %02.0f°"
+                             % (corr_az, corr_alt))
 
     def _on_phone_loc(self, lat, lon, _acc):
         if not self.chk_gps.isChecked():
             return
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (TypeError, ValueError):
+            return
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            return
         now = time.time()
         prev = self._phone_loc
         if prev is not None:
-            moved = (abs(lat - prev[0]) >= 0.00005
-                     or abs(lon - prev[1]) >= 0.00005)
-            if not moved and now - prev[2] < 5.0:
+            # set_location() recomputes sunset/moonset + live, so require a
+            # real move (~50 m) or 15 s before re-anchoring the observer.
+            moved = (abs(lat - prev[0]) >= 0.0005
+                     or abs(lon - prev[1]) >= 0.0005)
+            if not moved and now - prev[2] < 15.0:
                 return
         if self._phone_base_loc is None:
             self._phone_base_loc = (self.ctrl.city, self.ctrl.lat,

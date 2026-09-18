@@ -908,18 +908,47 @@ calculation and the recorded values.</p>
 
 <a name="live"></a><h3>11&nbsp;&nbsp;The Live page</h3>
 <p><img src="guide://shot-live" width="740"></p>
-<p>A Sun-Earth-Moon snapshot for <i>right now</i>, refreshed every 5 seconds
-(and on every visit). It is a top-down view: the Sun on the left, the Earth
-textured with the sub-solar point facing you, the Moon on its orbit ring at
-its true elongation from the Sun. The green arc of the orbit is the part where
-the moonlight would see the crescent above the horizon at your location; grey
-is below. The ring around the moon is green when the moon is up, grey when it
-is down (altitude &gt; 0&deg;). Your city is marked on the Earth's disk. The
-caption under the chart gives the phase name, illumination, and age.</p>
+<p>A live sky for <i>right now</i>, refreshed every 5 seconds (and on every
+visit). The <b>View</b> selector switches between two renderings of the same
+live position:</p>
+<p><b>3D Sighting Sky.</b> A hemispherical altitude–azimuth dome around you:
+compass cardinals (N highlighted), altitude rings, azimuth grid, horizon rim
+and translucent ground. The Sun is a glowing sphere; the Moon is shown at its
+<b>true phase</b>, shaded from the Sun's direction. Observer &rarr; Sun/Moon
+lines, a dashed Sun–Moon link and &plusmn;3 h trails help read the geometry.
+Camera buttons (Reset, Top, North, South, East, West), click-drag and
+scroll-zoom give full control; <b>Grid / Moon path / Sun path / Labels</b>
+declutter the scene.</p>
+<p><b>Horizon sky map.</b> A cylindrical <i>azimuth &times; altitude</i>
+panorama (130&deg; &times; 32&deg; window over the full 360&deg;): Sun, Moon
+at true phase and the bright planets with labels, each with its day-long
+altitude path, plus the <b>ecliptic</b> line. The background shifts seamlessly
+from day to twilight to night with the Sun, with a warm horizon glow at
+twilight. Pan with click-drag, mouse wheel, arrow buttons or N/E/S/W buttons.
+Every value comes from the same astronomy engine, so both views always agree
+with the Sighting verdict.</p>
 <p>Use the <b>LIVE time</b> slider under the chart to scrub through the 24 hours
 of the selected date (great for "when does the moon set tonight?"); press
 <b>NOW</b> to return to the current time and resume the 5-second live
 updates.</p>
+<p><b>Aim with your phone (SensorCast).</b> In the <i>Phone link</i> box enter
+your SensorCast username and press <b>Connect</b> (stream <b>Rotation
+Vector</b> + <b>Magnetic Field</b>, plus Accelerometer as backup, at the
+fastest delay; add GPS/Location to also move the observer). With <b>Drive sky
+map from phone</b> ticked, stand on your spot and point the <b>top edge of the
+phone</b> at the sky like a laser pointer (<i>Point with</i> can switch to
+<i>Back camera</i> photograph pose): turning your body pans left/right,
+tilting the top up/down pans vertically. The <b>mag uT</b> readout shows field
+health (&sim;25&ndash;65 &micro;T is clean Earth field; far outside means indoor
+interference &mdash; do a figure-8 wave, then use <b>North offset</b>).</p>
+<p><b>Calibrate pointing.</b> Point the top edge at the Moon (or Sun &mdash;
+never look directly at it, use the phone's shadow), drag that body to the
+<b>middle of the sky map</b> (or press <i>Center map on target</i>), then press
+<b>Calibrate...</b> &rarr; <i>Calibrate to Moon/Sun</i> (or <i>Calibrate to
+view centre</i> for the dragged position). The az/alt offset is stored,
+applied to every future frame, and kept across restarts (<i>Reset</i> clears
+it; switching <i>Point with</i> also resets it because offsets are
+axis-specific).</p>
 
 <a name="short"></a><h3>12&nbsp;&nbsp;Keyboard shortcuts</h3>
 <table border="1" cellspacing="0" cellpadding="4">

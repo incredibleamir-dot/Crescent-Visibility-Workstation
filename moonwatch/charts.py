@@ -454,7 +454,7 @@ class AltitudeChartWidget(QWidget):
             return plot.bottom() - (max(-90, min(90, alt)) + 90) / 180.0 * plot.height()
 
         zero_y = int(mapy(0))
-        thresh_y = int(mapy(theme_mabims_alt))
+        thresh_y = int(mapy(astronomy.MABIMS_ALT_MIN))
         p.setPen(QPen(QColor("#b9c4d1"), 1))
         p.drawLine(plot.left(), zero_y, plot.right(), zero_y)
         p.setPen(QPen(QColor(theme.C_CRIT), 1.2, Qt.DashLine))
@@ -483,7 +483,7 @@ class AltitudeChartWidget(QWidget):
                 h = plot.bottom() - int(mapy(alt))
                 x = plot.left() + int(i * bw) + int(bw * 0.18)
                 w = max(3, int(bw * 0.64))
-                visible = alt >= theme_mabims_alt
+                visible = alt >= astronomy.MABIMS_ALT_MIN
                 col = QColor(theme.C_SEE if visible else theme.C_CRIT)
                 if i == today_idx:
                     col = QColor(theme.C_TODAY)
@@ -511,7 +511,8 @@ class AltitudeChartWidget(QWidget):
                    theme.CHART_CAPTION, F(8))
 
 
-theme_mabims_alt = 3.0
+# Kept for backward compatibility; prefer astronomy.MABIMS_ALT_MIN.
+theme_mabims_alt = astronomy.MABIMS_ALT_MIN
 
 
 # --------------------------------------------------------------------------- scatter

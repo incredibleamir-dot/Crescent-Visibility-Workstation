@@ -18,7 +18,8 @@ import numpy as np
 
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import (QPainter, QColor, QImage, QPixmap,
-                           QRadialGradient, QPen, QPolygonF)
+                           QRadialGradient, QPen, QPolygonF,
+                           QLinearGradient)
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                                QPushButton, QLabel)
 
@@ -190,7 +191,7 @@ class HorizonSkyWidget(QWidget):
 
     def set_aim(self, az, alt):
         """Point the view centre at an (azimuth, altitude) aim, e.g. the
-        direction the phone's camera points in real space."""
+        direction the phone's selected edge points in real space."""
         self.set_center(az)
         self.set_alt_center(alt)
 
@@ -217,6 +218,8 @@ class _HorizonCanvas(QWidget):
         self._path_key = None
         self._sky_pm = None
         self._sky_key = None
+        self._ecl_pts = None
+        self._ecl_key = None
         self._drag_last = None
         self.setMinimumHeight(220)
         self.setMouseTracking(True)
@@ -291,8 +294,11 @@ class _HorizonCanvas(QWidget):
         dy = pos.y() - self._drag_last.y()
         self._drag_last = pos
         if self.width() and self.height():
-            self.owner.pan(-dx / self.width() * self.owner.SPAN)
-            self.owner.vpan(dy / self.height() * self.owner.VSPAN)
+            # Single update: panning twice would repaint twice per move.
+            daz = -dx / self.width() * self.owner.SPAN
+            dalt = dy / self.height() * self.owner.VSPAN
+            self.owner.set_aim(self.owner.az_center + daz,
+                               self.owner.alt_center + dalt)
 
     def mouseReleaseEvent(self, e):
         self._drag_last = None
@@ -326,7 +332,9 @@ class _HorizonCanvas(QWidget):
         p.end()
 
     def _draw_sky(self, p, w, h, sun_alt):
-        key = (w, h, int(round(sun_alt * 2.0)), round(self.alt_center, 1))
+        # alt_center rounded coarsely: phone aiming at 25 Hz would otherwise
+        # rebuild a full w*h numpy gradient on every sensor frame.
+        key = (w, h, int(round(sun_alt * 2.0)), round(self.alt_center * 2.0))
         if self._sky_key != key or self._sky_pm is None:
             self._sky_pm = self._build_sky_pixmap(w, h, sun_alt)
             self._sky_key = key
@@ -373,14 +381,31 @@ class _HorizonCanvas(QWidget):
         p.setBrush(g)
         p.drawRect(QRectF(0, gy - h * 0.4, w, h * 0.4))
 
-    def _draw_ecliptic(self, p):
+    def _ecliptic_alt_az(self):
+        # 240 ecl->horizon transforms per paint is the hottest loop when the
+        # phone drives the map at sensor rate; cache per ~10 s JD bucket.
         live = self.live
-        pts = []
+        key = (round(float(live["jd"]), 4), round(float(live["_lat"]), 4),
+               round(float(live["_lon"]), 4))
+        if key == self._ecl_key and self._ecl_pts is not None:
+            return self._ecl_pts
         lon_vals = np.linspace(0.0, 360.0, 240)
-        first = None
+        out = []
         for el in lon_vals:
-            alt, az = astronomy.ecl2alt_az(float(el), 0.0, live["jd"],
-                                           live["_lat"], live["_lon"])
+            try:
+                alt, az = astronomy.ecl2alt_az(float(el), 0.0, live["jd"],
+                                               live["_lat"], live["_lon"])
+            except Exception:
+                continue
+            out.append((float(alt), float(az)))
+        # keep the cache tiny (a handful of recent instants while scrubbing)
+        self._ecl_pts = out
+        self._ecl_key = key
+        return out
+
+    def _draw_ecliptic(self, p):
+        pts = []
+        for alt, az in self._ecliptic_alt_az():
             if alt > 0.0:
                 x = self._az_to_x(az)
                 if x is None:
@@ -440,12 +465,13 @@ class _HorizonCanvas(QWidget):
         gy = int(self._alt_to_y(-1.0))
         if gy < 0 or gy >= h:
             return
-        p.fillRect(0, gy, w, h - gy, QColor(12, 16, 26))
-        for y in range(gy, h):
-            f = (y - gy) / max(1.0, h - gy)
-            c = QColor(16 + 6 * f, 20 + 7 * f, 30 + 9 * f)
-            p.setPen(c)
-            p.drawLine(0, y, w, y)
+        # One gradient fill replaces ~h per-row drawLine calls.
+        grad = QLinearGradient(0, gy, 0, h)
+        grad.setColorAt(0.0, QColor(16, 20, 30))
+        grad.setColorAt(1.0, QColor(22, 27, 39))
+        p.setPen(Qt.NoPen)
+        p.setBrush(grad)
+        p.drawRect(0, gy, w, h - gy)
         trees = self._tree_points(w, gy, seed=7)
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(6, 8, 14))
